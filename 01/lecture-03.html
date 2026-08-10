@@ -54,6 +54,9 @@
       <a href="lecture-03.html" class="is-current">③ マルチエージェント</a>
       <a href="lecture-04.html">④ アーキテクチャ読解</a>
       <a href="appendix-commands.html">おまけ コマンド</a>
+      <a href="../02/index.html" class="nav-right">コマ2</a>
+      <a href="../03-05/index.html">コマ3-5</a>
+      <a href="../06/index.html">コマ6</a>
     </nav>
   </div>
   <div class="readbar"></div>
@@ -951,7 +954,7 @@
       note: '実装が最も簡単。<b>引数を1つ変えられると素通りする</b>のが弱点。' },
     { id: 'norm', n: '正規化一致', d: '引数を正規化して比較（timeout/retry 等の無関係な差分を無視）', fire: 4,
       note: '<b>実用上いちばん効く。</b>「本質的に同じ試行か」を定義する作業がそのまま設計になる。' },
-    { id: 'prog', n: '進捗ベース', d: 'K ターン状態（発見物）が増えていない', fire: 6,
+    { id: 'prog', n: '進捗ベース', d: 'K ターン状態（見つけた情報）が増えていない', fire: 6,
       note: '<b>最も汎用的で、効果が大きい。</b>手を変えているのに前に進んでいない状況まで捕まえられる。' +
         '「前進」の定義（新しいサービス／資格情報／シェル／昇格ベクタ）を状態スキーマで決めておくのが前提。' }
   ];

@@ -20,6 +20,9 @@
       <a href="lecture-03.html">③ マルチエージェント</a>
       <a href="lecture-04.html">④ アーキテクチャ読解</a>
       <a href="appendix-commands.html">おまけ コマンド</a>
+      <a href="../02/index.html" class="nav-right">コマ2</a>
+      <a href="../03-05/index.html">コマ3-5</a>
+      <a href="../06/index.html">コマ6</a>
     </nav>
   </div>
   <div class="readbar"></div>
@@ -215,12 +218,12 @@
     <div class="card">
       <span class="k" style="color:#1d9b7c">戦略 3</span>
       <h4>構造化された状態に外部化する</h4>
-      <p>発見物を <code>BaseModel</code> に格納し、履歴には<strong>「何をしたか」の要点だけ</strong>を残す。
+      <p>見つけた情報を <code>BaseModel</code> に格納し、履歴には<strong>「何をしたか」の要点だけ</strong>を残す。
       LLM は必要なときに状態を読むツールを呼ぶ。<strong>これがテンプレート実装の採る道。</strong></p>
     </div>
   </div>
 
-  <span class="code-cap">戦略3：発見物は履歴ではなく型付きの状態に置く</span>
+  <span class="code-cap">戦略3：見つけた情報は履歴ではなく型付きの状態に置く</span>
   <pre><code><span class="c-kw">from</span> dataclasses <span class="c-kw">import</span> dataclass, field
 <span class="c-kw">from</span> pydantic <span class="c-kw">import</span> BaseModel, Field
 
@@ -363,7 +366,7 @@ flowchart TD
         <tr><td>出力の型</td><td><code>output_type=</code></td><td>返り値を <code>BaseModel</code> で縛る。<strong>「文字列で報告」をやめるとハルシネーションが測れるようになる</strong></td></tr>
         <tr><td>ツール</td><td><code>@agent.tool</code></td><td>docstring と型注釈から自動でスキーマ生成。<code>RunContext</code> 経由で deps にアクセス</td></tr>
         <tr><td>ctx 不要のツール</td><td><code>@agent.tool_plain</code></td><td>依存を使わない純粋な関数用</td></tr>
-        <tr><td>動的プロンプト</td><td><code>@agent.system_prompt</code></td><td>実行時の状態をプロンプトに差し込む。<strong>「現在の発見物」を毎回入れるのに使う</strong></td></tr>
+        <tr><td>動的プロンプト</td><td><code>@agent.system_prompt</code></td><td>実行時の状態をプロンプトに差し込む。<strong>「現在の見つけた情報」を毎回入れるのに使う</strong></td></tr>
         <tr><td>訂正の差し戻し</td><td><code>ModelRetry</code></td><td>層1・層4の失敗を、ヒント付きで LLM に返す</td></tr>
         <tr><td>出力の検証</td><td><code>@agent.output_validator</code></td><td>証拠チェックの置き場所</td></tr>
         <tr><td>予算の上限</td><td><code>UsageLimits</code></td><td>リクエスト数・トークン数の上限。<strong>暴走を止める最後の砦</strong></td></tr>

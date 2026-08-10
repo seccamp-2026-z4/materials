@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>座学① ペネトレーションテストの基礎 ｜ Z4 コマ1</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ1</b><span>SEMINAR MATERIALS</span></a>
+    <nav class="topnav">
+      <a href="index.html">概要</a>
+      <a href="lab-portal.html">⓪ ラボ環境</a>
+      <a href="lecture-01.html" class="is-current">① ペンテスト基礎</a>
+      <a href="lecture-02.html">② エージェント基礎</a>
+      <a href="lecture-03.html">③ マルチエージェント</a>
+      <a href="lecture-04.html">④ アーキテクチャ読解</a>
+      <a href="appendix-commands.html">おまけ コマンド</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">座学 ① ／ 09:55 – 10:25</p>
+  <h1>ペネトレーションテストの基礎</h1>
+  <p class="lede">
+    この座学の目的は、手技を教えることではない。<strong>「人間のペンテスターが、各局面で何を判断しているか」を分解して取り出す</strong>こと。
+    取り出した判断が、そのままエージェントに組み込むべきロジックになる。
+  </p>
+  <p class="lede">
+    手動チャレンジで自分がやったことを、この枠組みに当てはめながら聞いてほしい。
+  </p>
+</div>
+
+<!-- ============ 0. ウォームアップクイズ ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">0</span>ウォームアップクイズ — まず自分の理解を確認する</h2>
+  <p class="sec-lede">
+    正解を暗記するためではなく、ペンテスト中に何を確認しているのかを意識するための小問。
+    10問すべてに答えてから採点する。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">10問クイズ</span>
+    </div>
+    <div class="demo-body" id="warmup-body"></div>
+    <div class="demo-foot" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <span id="warmup-foot">各問で1つ選ぶ。全問選んだら答え合わせ。</span>
+      <span class="ctl">
+        <span class="rng-lbl" id="warmup-count">0 / 10</span>
+        <button class="btn primary" id="warmup-grade">答え合わせ</button>
+        <button class="btn" id="warmup-reset">リセット</button>
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 1. フェーズ構成 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">1</span>フェーズ構成 — 偵察 / 侵入 / ポストエクスプロイト</h2>
+  <p class="sec-lede">
+    ネットワークペンテストは大きく3つのフェーズに分かれる。重要なのは区切りの名前ではなく、
+    <strong>各フェーズが「どんな情報を持っていない状態」から「何を得た状態」への移動なのか</strong>という点。
+    エージェントのフェーズ遷移条件は、ここから導く。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">フェーズを選ぶと、そこで何を判断しているかが出る</span>
+      <span class="ctl">
+        <div class="seg" id="ph-seg">
+          <button data-v="0" class="is-on">偵察</button>
+          <button data-v="1">侵入</button>
+          <button data-v="2">ポストEx</button>
+        </div>
+      </span>
+    </div>
+    <div class="demo-body">
+      <svg viewBox="0 0 900 172" role="img" aria-label="ペンテストの3フェーズ">
+        <defs>
+          <marker id="pa" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#9fb2ba"/>
+          </marker>
+        </defs>
+
+        <!-- 状態遷移の軸 -->
+        <text class="svg-mono" x="30" y="26">STATE</text>
+        <text class="svg-sub" x="96"  y="26">IPだけ知っている</text>
+        <text class="svg-sub" x="330" y="26">攻撃面が分かった</text>
+        <text class="svg-sub" x="560" y="26">低権限シェルがある</text>
+        <text class="svg-sub" x="790" y="26">root</text>
+
+        <line x1="30" y1="38" x2="870" y2="38" stroke="#e2ecef"/>
+        <circle cx="96"  cy="38" r="4" fill="#cddde2"/>
+        <circle cx="330" cy="38" r="4" fill="#14b8c4"/>
+        <circle cx="560" cy="38" r="4" fill="#2ec4a0"/>
+        <circle cx="800" cy="38" r="5" fill="#f4674f"/>
+
+        <g id="ph-boxes"></g>
+
+        <path class="svg-arrow" d="M292,102 L318,102" marker-end="url(#pa)"/>
+        <path class="svg-arrow" d="M572,102 L598,102" marker-end="url(#pa)"/>
+
+        <!-- 戻りの矢印（現実は一方通行ではない） -->
+        <path d="M420,146 C420,168 180,168 180,146" fill="none" stroke="#f4674f" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#pa)"/>
+        <path d="M700,146 C700,168 460,168 460,146" fill="none" stroke="#f4674f" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#pa)"/>
+      </svg>
+      <p class="svg-sub" style="text-align:center;font-size:12px;color:var(--ink-3);margin:6px 0 0">
+        赤い破線＝現実に頻発する<strong>後戻り</strong>。侵入に失敗したら偵察に戻る、内部から見えた情報で外部偵察をやり直す。
+      </p>
+    </div>
+    <div class="demo-foot" id="ph-info"></div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">エージェント設計への含意</span>
+    <p><strong>フェーズを一方通行のパイプラインとして実装すると、必ず詰まる。</strong>
+    「侵入で有効なベクタがなくなったら偵察に戻る」「内部で得たネットワーク情報で偵察をやり直す」という<mark>後戻りの経路</mark>を、
+    Orchestrator のフェーズ遷移方針に最初から入れる必要がある。テンプレート実装がこれをどう扱っているかは<a href="lecture-04.html">座学④</a>で確認する。</p>
+  </div>
+</section>
+
+<!-- ============ 2. 判断の解剖 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">2</span>各フェーズで何を判断しているか</h2>
+  <p class="sec-lede">
+    ペンテスターの作業は、コマンドの実行ではない。<strong>観測 → 仮説 → 選択 → 検証</strong>の連鎖。
+    実際の攻略トレースを1手ずつ分解して、どこに判断が入っているかを見る。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">攻略トレースの分解（やさしい標的の典型例）</span>
+      <span class="ctl">
+        <button class="btn" id="tr-prev">← 戻る</button>
+        <button class="btn primary" id="tr-play">▶ 自動再生</button>
+        <button class="btn" id="tr-next">進む →</button>
+        <span class="rng-lbl" id="tr-count">1 / 8</span>
+      </span>
+    </div>
+    <div class="demo-body" style="padding:0">
+      <div style="display:grid;grid-template-columns:230px 1fr;min-height:340px">
+        <!-- 左：手順リスト -->
+        <div id="tr-list" style="border-right:1px solid var(--line);background:var(--paper-2);padding:12px 0"></div>
+        <!-- 右：分解 -->
+        <div style="padding:22px 24px" id="tr-detail"></div>
+      </div>
+    </div>
+    <div class="demo-foot" id="tr-foot"></div>
+  </div>
+
+  <h3 id="types">判断の4類型</h3>
+  <p>上のトレースに出てくる判断は、突き詰めると次の4つに分類できる。<strong>エージェントの失敗も、この4つのどれかで起きる。</strong></p>
+  <div class="grid g4">
+    <div class="card">
+      <span class="k">TYPE A</span>
+      <h4>次に何を観測するか</h4>
+      <p>候補は無数にある。全部やると時間が尽きる。<strong>情報利得が最大の観測を選ぶ</strong>。<br><span class="chip sea">偵察の中核</span></p>
+    </div>
+    <div class="card">
+      <span class="k">TYPE B</span>
+      <h4>観測から何を仮説するか</h4>
+      <p>バナー・エラー・レスポンス差から、実装と脆弱性を当てる。<strong>ここが最も知識依存</strong>。<br><span class="chip mint">仮説形成</span></p>
+    </div>
+    <div class="card">
+      <span class="k">TYPE C</span>
+      <h4>いつ打ち切るか</h4>
+      <p>この方向は行き止まり、と判断して別方向へ移る。<strong>エージェントが最も苦手</strong>。同じ手を延々繰り返す。<br><span class="chip coral">撤退判断</span></p>
+    </div>
+    <div class="card">
+      <span class="k">TYPE D</span>
+      <h4>成功したと言えるか</h4>
+      <p>「取れた気がする」と「取れた」の区別。<strong>証拠の要求</strong>。ここが緩いとハルシネーションになる。<br><span class="chip sand">検証</span></p>
+    </div>
+  </div>
+
+  <div class="note key">
+    <span class="lbl">押さえどころ</span>
+    <p>この4類型は、そのまま<strong>コマ3〜5の失敗レビューの骨格</strong>になる。実行ログを読むとき
+    「A で漏らしたのか、B で誤ったのか、C ができずループしたのか、D が緩くてハルシネーションしたのか」で分けると、
+    直すべき場所（ツール／プロンプト／状態／評価）が一意に決まる。</p>
+  </div>
+</section>
+
+<!-- ============ 3. 証拠と再現性 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">3</span>証拠と再現性</h2>
+  <p class="sec-lede">
+    ペンテストの成果物は「侵入できた」という感想ではなく、<strong>第三者が同じ手順で再現でき、かつ客観的に検証できる証拠</strong>。
+    本ゼミでは <span class="chip coral">ハルシネーション率 0 が要件</span> なので、この基準を自動判定に機械的に組み込むことになる。
+  </p>
+
+  <h3>主張には、対応する証拠がある</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:26%">主張</th><th style="width:37%">弱い根拠（自己申告・信用しない）</th><th>検証可能な証拠</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>ポートが開いている</strong></td>
+          <td>「スキャンで見えた気がする」</td>
+          <td>スキャナの生出力＋タイムスタンプ。再実行で同じ結果が出る</td>
+        </tr>
+        <tr>
+          <td><strong>この脆弱性がある</strong></td>
+          <td>「バージョン的に該当するはず」</td>
+          <td>実際に挙動を引き起こしたリクエストとレスポンスの対。バージョン一致は<strong>仮説であって証拠ではない</strong></td>
+        </tr>
+        <tr>
+          <td><strong>シェルを取得した</strong></td>
+          <td>「エクスプロイトがエラーを返さなかった」</td>
+          <td>そのシェル上で実行した <code>id</code> / <code>hostname</code> の出力。標的固有の値が返ること</td>
+        </tr>
+        <tr>
+          <td><strong>root を取得した</strong></td>
+          <td>「sudo が通った」</td>
+          <td><code>id</code> が <code>uid=0(root)</code>。かつ <strong>root でしか読めないファイル</strong>（例：<code>/etc/shadow</code> の先頭行）が読めること</td>
+        </tr>
+        <tr>
+          <td><strong>この手順で再現できる</strong></td>
+          <td>「だいたいこうやった」</td>
+          <td>標的をリセットしてから同じ手順を流し、同じ結果になることの確認</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">証拠クイズ — この報告を信じてよいか</span>
+      <span class="ctl"><button class="btn" id="q-reset">リセット</button><span class="rng-lbl" id="q-score">0 / 4</span></span>
+    </div>
+    <div class="demo-body" id="q-body"></div>
+    <div class="demo-foot" id="q-foot">エージェントのレポートを読むときの目の付け所。4問。</div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">最も危険な失敗</span>
+    <p>「root を取った」と報告して実際は取れていないのが、この種のエージェントで最悪の失敗モード。
+    改善のフィードバックループ自体が壊れるため、以降の全計測が信用できなくなる。
+    <strong>客観的に検証できる証拠が取れたことを唯一の成功判定にする</strong>（自動判定に組み込む）。
+    エージェントの自己申告は評価に一切使わない、を設計で強制する。</p>
+  </div>
+</section>
+
+<!-- ============ 4. 実務での進め方 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">4</span>実務での進め方と、自動化が難しい理由</h2>
+  <p class="sec-lede">
+    既存の脆弱性スキャナは20年以上前からある。それでもペンテストが手作業のままなのはなぜか。
+    <strong>難しさの正体を特定できれば、そこがエージェント設計で工夫すべき場所になる。</strong>
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+flowchart TB
+  subgraph SC["脆弱性スキャナ（自動化済み）"]
+    direction LR
+    S1["既知シグネチャと<br/>照合する"] --> S2["該当を列挙する"]
+  end
+  subgraph PT["ペネトレーションテスト（自動化困難）"]
+    direction LR
+    P1["観測から<br/>仮説を立てる"] --> P2["仮説を実際に<br/>試して検証する"]
+    P2 --> P3["失敗の内容から<br/>仮説を組み替える"]
+    P3 --> P1
+    P2 --> P4["連鎖させて<br/>目的に到達する"]
+  end
+  SC -.->|"ここまでしか<br/>やらない"| PT
+
+  classDef a fill:#f6fbfc,stroke:#cddde2,color:#365360
+  classDef b fill:#fdf8f1,stroke:#f2b544,color:#10262e
+  class S1,S2 a
+  class P1,P2,P3,P4 b
+      </div>
+    </div>
+    <figcaption><b>図1-2</b>　スキャナは「照合」で終わる。ペンテストは<b>仮説 → 検証 → 組み替え</b>のループと、単体では無害な事実の<b>連鎖</b>で成立する。LLMエージェントに期待されているのは、まさにこのループと連鎖の部分。</figcaption>
+  </figure>
+
+  <h3>自動化が難しい5つの理由</h3>
+  <div class="grid g2">
+    <div class="card">
+      <span class="k">REASON 1</span>
+      <h4>探索空間が広い</h4>
+      <p>「次にやれること」の候補は、状況が進むごとに増える。全部試す時間はない。
+      本質は<strong>候補を絞り込む判断</strong> — <mark>どれを先に試すか（<a href="#types">判断の4類型</a>のA）</mark>と
+      <mark>どこで見切りをつけるか（同C）</mark>。ここに正解のテーブルは存在しない。</p>
+    </div>
+    <div class="card">
+      <span class="k">REASON 2</span>
+      <h4>成功が「連鎖」でしか定義できない</h4>
+      <p>単体では無害な事実（読めるファイル、緩い権限、古いバイナリ）が、組み合わせで致命的になる。
+      <strong>個々のチェックをいくら並べても、連鎖は見つからない。</strong></p>
+    </div>
+    <div class="card">
+      <span class="k">REASON 3</span>
+      <h4>環境が毎回違う</h4>
+      <p>OSの版、パッチ、設定、独自実装。<strong>PoC はほぼ確実にそのままでは動かない</strong>。
+      エラーを読んで適応させる作業が要る。ここが侵入役担当の主な担当範囲。</p>
+    </div>
+    <div class="card">
+      <span class="k">REASON 4</span>
+      <h4>公開情報がない対象がある</h4>
+      <p>0-day、内製アプリ、独自プロトコル。<strong>検索して出てこない</strong>。
+      検索を軸に組まれたエージェントはここで停止する。<strong>他人の知識に頼れないとき、対象そのものを触って調べ直す</strong>やり方に切り替えられる必要がある。</p>
+    </div>
+    <div class="card">
+      <span class="k">REASON 5</span>
+      <h4>失敗の解釈が難しい</h4>
+      <p>「効かなかった」のか「効いたが観測できていない」のか「前提が間違っている」のか。
+      <strong>同じエラーでも次の一手は変わる。</strong>ここを誤ると同じ手を繰り返すループに入る。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">→ 本ゼミの設計</span>
+      <h4>これらが標的に埋まっている</h4>
+      <p>ラボの標的は意図的に多様に作られている（Webのないもの、既知CVE を突くもの、独自実装の欠陥を突くもの）。
+      <strong>Webスキャンしかしないエージェントは、最初から半分落ちる。</strong>
+      REASON 1〜5 のどれに当たるかは、開けてみるまで分からない。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="lbl">検索で有用な情報が見つからないとき何をするか</span>
+    <p>人間は検索で有用な情報が見つからなくても止まらない。バイナリを読む、入力を壊してみる、似た製品の既知パターンを当てはめる、
+    プロトコルを推測する、といった<strong>対象そのものを触って調べ直す探索</strong>に切り替える。
+    <mark>「誰かが書いた情報」ではなく「目の前の実物」を情報源にする</mark>、という切り替え。
+    テンプレート実装は Web検索エージェントへの相談を軸に組まれているため、この切り替えが設計されていないとそこで停止する。
+    <strong>本ゼミで最も価値のある学びどころ</strong>で、0-day や内製アプリでは日常的に起きる状況。</p>
+  </div>
+</section>
+
+<!-- ============ 5. ワークシート ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">5</span>手動チャレンジを、この枠組みに当てはめる</h2>
+  <p class="sec-lede">
+    座学の最後に、各自の攻略メモをこの表に整理する。<strong>埋まらないマスが、エージェントに欠けている能力</strong>。
+    そのまま担当エージェントの改善バックログの1行目になる。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:15%">フェーズ</th>
+          <th>自分が観測したもの<br><span style="font-weight:400;color:var(--ink-3)">→ ツール要件</span></th>
+          <th>そこから立てた仮説<br><span style="font-weight:400;color:var(--ink-3)">→ プロンプト要件</span></th>
+          <th>覚えておく必要があった情報<br><span style="font-weight:400;color:var(--ink-3)">→ 状態設計</span></th>
+          <th>詰まった箇所と抜け方<br><span style="font-weight:400;color:var(--ink-3)">→ 回復戦略</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>偵察</strong></td><td colspan="4" style="color:var(--ink-4);text-align:center">— 当日ここを埋める —</td></tr>
+        <tr><td><strong>侵入</strong></td><td colspan="4" style="color:var(--ink-4);text-align:center">— 当日ここを埋める —</td></tr>
+        <tr><td><strong>ポストEx</strong></td><td colspan="4" style="color:var(--ink-4);text-align:center">— 当日ここを埋める —</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid g2">
+    <div class="card tint">
+      <span class="k">CHECK</span>
+      <h4>「見た情報」を全部書けているか</h4>
+      <p>人間は無意識に大量の情報を使っている。ページのタイトル、レスポンスの遅さ、ポート番号の並び方。
+      <strong>書き出さないとツールの出力に含まれず、エージェントには存在しない情報になる。</strong></p>
+    </div>
+    <div class="card tint">
+      <span class="k">CHECK</span>
+      <h4>「やらなかったこと」を書けているか</h4>
+      <p>候補にあったが選ばなかった手と、その理由。<strong>これが枝刈りのロジック</strong>そのもので、
+      エージェントの探索効率（LLM要求数）を決める。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ まとめ ============ -->
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>この座学の要点</h2>
+  <div class="grid g3">
+    <div class="card tint2">
+      <h4>1. フェーズは一方通行ではない</h4>
+      <p>後戻りの経路を設計に入れる。入れないと必ず詰まる。</p>
+    </div>
+    <div class="card tint2">
+      <h4>2. 判断は4類型に分解できる</h4>
+      <p>観測選択・仮説形成・撤退判断・成功検証。失敗分類の骨格になる。</p>
+    </div>
+    <div class="card tint2">
+      <h4>3. 成功判定は証拠でのみ行う</h4>
+      <p>自己申告は評価に使わない。ハルシネーション率0を機械的に保証する。</p>
+    </div>
+  </div>
+  <p style="margin-top:24px">
+    次の <a href="lecture-02.html">座学②</a> では、ここで分解した「観測 → 仮説 → 選択 → 検証」のループを、
+    実際に LLM エージェントとして動かす型を扱う。<strong>形がそっくりであることに気づくはず</strong>で、それが狙い。
+  </p>
+</section>
+
+<div class="wrap">
+  <div class="pager">
+    <a href="index.html"><span class="dir">PREV</span><span class="nm">← コマ1 概要</span></a>
+    <a class="next" href="lecture-02.html"><span class="dir">NEXT</span><span class="nm">座学② AIエージェントの基礎 →</span></a>
+  </div>
+  <footer class="foot">
+    <span>Z4 ／ コマ1 座学① ペネトレーションテストの基礎</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif',
+    themeVariables: {
+      primaryColor: '#f6fbfc', primaryTextColor: '#10262e', primaryBorderColor: '#0e8f9e',
+      lineColor: '#6f8791', secondaryColor: '#fdf8f1', tertiaryColor: '#ffffff', fontSize: '13px'
+    },
+    flowchart: { curve: 'basis', padding: 14 }
+  });
+  window.mermaid = mermaid;
+</script>
+
+<script src="assets/app.js"></script>
+<script>
+/* =======================================================
+   0. ウォームアップクイズ
+   ======================================================= */
+(function () {
+  const qs = [
+    {
+      q: 'nmap で TCP の空いているポートはなぜ発見できるのか？',
+      choices: [
+        'SYN に対して SYN/ACK が返るため',
+        'DNS が開放ポートを教えてくれるため',
+        'HTTP のステータスコードで判定するため',
+        'OS が全ポート一覧を返すため'
+      ],
+      a: 0,
+      why: 'TCP は接続の手順がある。SYN に対して SYN/ACK が返れば、そのポートは接続を受け付けていると判断できる。'
+    },
+    {
+      q: 'UDP のポートスキャンは TCP と何が違うか？',
+      choices: [
+        'UDP は必ずバナーを返すため、TCP より簡単',
+        'UDP には接続確立がないため、返答なしの解釈が難しい',
+        'UDP は 80 番と 443 番しか使わない',
+        'UDP は nmap では調べられない'
+      ],
+      a: 1,
+      why: 'UDP は TCP のような接続確立がない。返答がない場合でも、開いているのか、パケットが落ちたのかを区別しにくい。'
+    },
+    {
+      q: '<code>id</code> コマンドを実行する目的は何か？',
+      choices: [
+        'OS のバージョンを確認するため',
+        '開いているポートを確認するため',
+        '現在のユーザ権限を確認するため',
+        'ファイルの中身を検索するため'
+      ],
+      a: 2,
+      why: '<code>id</code> は現在のユーザ ID とグループを表示する。<code>uid=0(root)</code> なら root 権限で動いている証拠になる。'
+    },
+    {
+      q: '<code>/etc/passwd</code> が読めた。root 権限を取得したと言えるか？',
+      choices: [
+        '言える。<code>/etc/passwd</code> は root 専用ファイルだから',
+        '言える。Linux ではファイルが読めれば root だから',
+        '判断できないので必ず再起動する',
+        '言えない。多くの環境で一般ユーザも読める'
+      ],
+      a: 3,
+      why: '<code>/etc/passwd</code> は一般ユーザでも読めることが多い。root 権限の証拠には <code>id</code> や root 限定ファイルの確認が必要。'
+    },
+    {
+      q: 'Web サーバで 401 が返った。何が分かったと言えるか？',
+      choices: [
+        'そのパスは存在しない',
+        '認証が必要なリソースが存在する可能性がある',
+        'root 権限を取得できた',
+        'UDP が開いている'
+      ],
+      a: 1,
+      why: '401 は「認証が必要」という意味。存在しないと決めるのではなく、認証保護された機能がある手がかりとして扱う。'
+    },
+    {
+      q: 'バージョンが CVE に一致した。脆弱性があると断定できるか？',
+      choices: [
+        '断定できる。バージョン一致だけで十分',
+        '断定できる。ただし Web の場合だけ',
+        '断定できない。実際の挙動で検証する必要がある',
+        'CVE は権限昇格にしか関係しない'
+      ],
+      a: 2,
+      why: 'バージョン一致は仮説。バックポート修正、設定、到達経路の有無で結果は変わる。'
+    },
+    {
+      q: 'リバースシェルで確認すべき通信方向はどちらか？',
+      choices: [
+        'ブラウザからポータルへ向かう方向',
+        '自分から DNS サーバへ向かう方向',
+        'GitHub から標的へ向かう方向',
+        '標的から自分の実行環境へ戻ってくる方向'
+      ],
+      a: 3,
+      why: '攻撃コードを送れるだけでは不十分。標的から自分の実行環境へ戻る通信が通らないと、シェルは受け取れない。'
+    },
+    {
+      q: '<code>sudo -l</code> は何を確認するコマンドか？',
+      choices: [
+        '現在開いている TCP ポート',
+        '現在のユーザが sudo で実行できるコマンド',
+        'インストール済みパッケージ一覧',
+        'ログイン中の全ユーザのパスワード'
+      ],
+      a: 1,
+      why: '<code>sudo -l</code> は sudo で実行できるコマンドを確認する。<code>NOPASSWD</code> 付きの危険なコマンドは権限昇格の候補になる。'
+    },
+    {
+      q: 'SUID が付いたファイルを見る理由は何か？',
+      choices: [
+        '必ずネットワーク越しに実行されるため',
+        '必ず暗号化されているため',
+        'ファイル所有者の権限で実行されるため',
+        '一般ユーザからは実行できないため'
+      ],
+      a: 2,
+      why: 'SUID 付きファイルは、実行者ではなくファイル所有者の権限で動く。root 所有なら権限昇格につながることがある。'
+    },
+    {
+      q: '「コマンドがエラーにならなかった」は成功の証拠になるか？',
+      choices: [
+        '成功の証拠になる。エラーがなければ十分',
+        'root 権限の証拠になる',
+        'ネットワーク到達性の証拠にはならないが root の証拠になる',
+        'それだけでは不十分。目的達成を別に検証する'
+      ],
+      a: 3,
+      why: 'エラーがないことと目的達成は別。シェル取得なら <code>id</code> や <code>hostname</code>、root 取得なら <code>uid=0</code> などで検証する。'
+    }
+  ];
+
+  const body = document.getElementById('warmup-body');
+  const foot = document.getElementById('warmup-foot');
+  const count = document.getElementById('warmup-count');
+  if (!body) return;
+  const KEY = 'z4-lecture01-warmup-v1';
+  let saved = { picks: {}, graded: false };
+  try {
+    saved = { ...saved, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    saved.picks = saved.picks || {};
+  } catch (e) {
+    saved = { picks: {}, graded: false };
+  }
+
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* noop */ }
+  }
+
+  function selectedCount() {
+    return body.querySelectorAll('.warmup-q[data-picked]').length;
+  }
+
+  function paintCount() {
+    count.textContent = selectedCount() + ' / ' + qs.length;
+  }
+
+  function render() {
+    body.innerHTML = '';
+    qs.forEach((q, i) => {
+      const order = q.choices.map((c, k) => ({ c, k }));
+      for (let j = order.length - 1; j > 0; j--) {
+        const r = Math.floor(Math.random() * (j + 1));
+        [order[j], order[r]] = [order[r], order[j]];
+      }
+      const box = document.createElement('div');
+      box.className = 'warmup-q';
+      box.dataset.i = i;
+      box.style.cssText = 'border:1px solid var(--line);border-radius:3px;padding:16px 18px;margin-bottom:12px;background:#fff';
+      box.innerHTML =
+        '<div style="font-size:14.5px;font-weight:700;line-height:1.7;margin-bottom:12px">' +
+        '<span class="chip sea" style="margin-right:8px">Q' + (i + 1) + '</span>' + q.q + '</div>' +
+        '<div class="choices" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px"></div>' +
+        '<div class="answer" style="display:none;margin-top:12px;font-size:13px;line-height:1.75;color:var(--ink-2)"></div>';
+      const choices = box.querySelector('.choices');
+      order.forEach(({ c, k }) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.type = 'button';
+        btn.dataset.choice = k;
+        btn.style.cssText = 'text-align:left;justify-content:flex-start;white-space:normal;line-height:1.6;height:auto;padding:8px 10px';
+        btn.innerHTML = c;
+        btn.addEventListener('click', () => {
+          if (body.dataset.graded) return;
+          box.dataset.picked = k;
+          saved.picks[i] = k;
+          saved.graded = false;
+          save();
+          box.querySelectorAll('button').forEach((b) => b.classList.remove('is-on'));
+          btn.classList.add('is-on');
+          paintCount();
+        });
+        choices.appendChild(btn);
+      });
+      if (saved.picks[i] !== undefined) {
+        box.dataset.picked = saved.picks[i];
+        const pickedBtn = box.querySelector('button[data-choice="' + saved.picks[i] + '"]');
+        if (pickedBtn) pickedBtn.classList.add('is-on');
+      }
+      body.appendChild(box);
+    });
+    delete body.dataset.graded;
+    foot.innerHTML = '各問で1つ選ぶ。全問選んだら答え合わせ。';
+    paintCount();
+    if (saved.graded && selectedCount() === qs.length) grade(false);
+  }
+
+  function grade(persist) {
+    if (selectedCount() < qs.length) {
+      foot.innerHTML = '<b style="color:#d24a33">未回答があります。</b>10問すべて選んでから答え合わせ。';
+      return;
+    }
+    if (persist) {
+      saved.graded = true;
+      save();
+    }
+    body.dataset.graded = '1';
+    let score = 0;
+    body.querySelectorAll('.warmup-q').forEach((box) => {
+      const i = +box.dataset.i;
+      const picked = +box.dataset.picked;
+      const q = qs[i];
+      const right = picked === q.a;
+      if (right) score++;
+      box.style.borderColor = right ? 'var(--mint)' : 'var(--coral)';
+      box.querySelectorAll('button').forEach((btn) => {
+        const k = +btn.dataset.choice;
+        btn.disabled = true;
+        if (k === q.a) btn.style.borderColor = 'var(--mint)';
+        if (k === picked && !right) btn.style.borderColor = 'var(--coral)';
+      });
+      const ans = box.querySelector('.answer');
+      ans.style.display = 'block';
+      ans.innerHTML = '<b style="color:' + (right ? '#1d9b7c' : '#d24a33') + '">' +
+        (right ? '正解' : '不正解') + '</b>　' + q.why;
+    });
+    foot.innerHTML = '<b>スコア：' + score + ' / ' + qs.length + '</b>　' +
+      (score === qs.length ? '全問正解。' : '間違えた問題の解説を確認する。');
+  }
+
+  document.getElementById('warmup-grade').addEventListener('click', () => grade(true));
+
+  document.getElementById('warmup-reset').addEventListener('click', () => {
+    saved = { picks: {}, graded: false };
+    try { localStorage.removeItem(KEY); } catch (e) { /* noop */ }
+    render();
+  });
+  render();
+})();
+
+/* =======================================================
+   1. フェーズ切替
+   ======================================================= */
+(function () {
+  const NS = 'http://www.w3.org/2000/svg';
+  const phases = [
+    {
+      name: '偵察', en: 'RECONNAISSANCE', x: 60, w: 232, color: '#14b8c4',
+      goal: '攻撃面を確定させる',
+      lines: ['ポート/サービス/版の列挙', 'Web の内容とパス探索', '製品特定 → CVE 紐付け'],
+      q: '<b style="color:#14b8c4">偵察で判断していること</b>　—　' +
+         '「どこまで列挙したら十分か」（全ポート？UDP も？）、「どの発見が最も脈がありそうか」、' +
+         '「このバナーの製品名と版は何か」。<b>列挙の打ち切り判断</b>が甘いとここで時間を溶かし、' +
+         '厳しすぎると非HTTPサービスを見逃す。担当Aの主な担当範囲。'
+    },
+    {
+      name: '侵入', en: 'INITIAL ACCESS', x: 328, w: 232, color: '#2ec4a0',
+      goal: '任意コード実行を得る',
+      lines: ['PoC の取得と環境への適応', '実行 → 失敗の解釈 → 再試行', '別ベクタへの切り替え'],
+      q: '<b style="color:#1d9b7c">侵入で判断していること</b>　—　' +
+         '「このエラーは前提条件不足か、パスの違いか、そもそも脆弱でないのか」。' +
+         '<b>PoC はまず動かない</b>ので、失敗の読み取りと適応が仕事の中身になる。' +
+         '検索で有用な情報が見つからないときに、対象そのものを触って調べ直す方向へ切り替えられるかが分かれ目。担当Bの主な担当範囲。'
+    },
+    {
+      name: 'ポストエクスプロイト', en: 'POST-EXPLOITATION', x: 608, w: 232, color: '#f4674f',
+      goal: '権限昇格と目的の達成',
+      lines: ['内部偵察（ユーザ/プロセス/NW）', '昇格ベクタの体系的列挙', 'SUID/sudo/cron/cap/PATH'],
+      q: '<b style="color:#d24a33">ポストExで判断していること</b>　—　' +
+         '「この一覧のどれが実際に悪用可能か」。SUID バイナリが50個あっても効くのは1つ。' +
+         '<b>GTFOBins 的推論</b>（このバイナリの機能で何ができるか）を体系化できるかが鍵。' +
+         'ここで得た内部情報で偵察をやり直す判断も要る。担当Cの主な担当範囲。'
+    }
+  ];
+
+  const g = document.getElementById('ph-boxes');
+  const info = document.getElementById('ph-info');
+  const rects = [];
+
+  phases.forEach((p) => {
+    const r = document.createElementNS(NS, 'rect');
+    r.setAttribute('x', p.x); r.setAttribute('y', 58);
+    r.setAttribute('width', p.w); r.setAttribute('height', 88);
+    r.setAttribute('rx', 3); r.setAttribute('fill', '#fff');
+    r.setAttribute('stroke', p.color); r.setAttribute('stroke-width', 1.4);
+    g.appendChild(r); rects.push(r);
+
+    const bar = document.createElementNS(NS, 'rect');
+    bar.setAttribute('x', p.x); bar.setAttribute('y', 58);
+    bar.setAttribute('width', 3); bar.setAttribute('height', 88);
+    bar.setAttribute('fill', p.color); g.appendChild(bar);
+
+    const mk = (x, y, cls, txt, extra) => {
+      const t = document.createElementNS(NS, 'text');
+      t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('class', cls);
+      if (extra) Object.entries(extra).forEach(([k, v]) => t.setAttribute(k, v));
+      t.textContent = txt; g.appendChild(t);
+    };
+    mk(p.x + 18, 78, 'svg-mono', p.en, { fill: p.color });
+    mk(p.x + 18, 100, 'svg-label', p.name, { 'font-weight': '700', 'font-size': '15' });
+    mk(p.x + 18, 120, 'svg-sub', '→ ' + p.goal, { fill: '#365360' });
+    mk(p.x + 18, 138, 'svg-sub', p.lines.join(' ・ '), { 'font-size': '9.5' });
+  });
+
+  function pick(i) {
+    rects.forEach((r, k) => r.setAttribute('fill', k === +i ? phases[k].color + '12' : '#fff'));
+    info.innerHTML = phases[+i].q;
+  }
+  Z4.seg(document.getElementById('ph-seg'), pick);
+  pick(0);
+})();
+
+/* =======================================================
+   2. 攻略トレースの分解
+   ======================================================= */
+(function () {
+  const steps = [
+    { act: 'nmap -p- 10.10.10.5', type: 'A',
+      obs: '22/tcp ssh OpenSSH 7.6p1 ／ 8080/tcp http Apache Tomcat 9.0.30',
+      hyp: '入口は2つ。SSH は資格情報がないと厳しい。Tomcat は管理画面と既知の脆弱性が多い',
+      dec: 'Tomcat を先に見る', why: '<b>期待値が高い順に並べた。</b>SSH は総当たり以外の手がなく時間対効果が悪い' },
+    { act: 'ブラウザで 8080 を開く', type: 'A',
+      obs: 'Tomcat のデフォルト画面。/manager/html は 401 を返す',
+      hyp: 'manager が生きている。デフォルト資格情報か、認証不要の別経路があるかもしれない',
+      dec: 'バージョンと 401 の事実を控えて検索へ', why: '<b>401 は「無い」ではなく「ある」の証拠。</b>存在の確認自体が前進' },
+    { act: 'Tomcat 9.0.30 の既知脆弱性を調べる', type: 'B',
+      obs: 'CVE-2020-1938（Ghostcat, AJP 8009）が該当。ただし 8009 はスキャン結果に無かった',
+      hyp: '版としては該当するが、当該ポートが閉じているなら経路がない',
+      dec: 'Ghostcat は保留。manager のデフォルト資格情報を先に試す',
+      why: '<mark>版の一致は仮説であって証拠ではない。</mark>経路の有無を先に確認するほうが低コスト' },
+    { act: 'tomcat / s3cret 等の既定の組み合わせを試す', type: 'B',
+      obs: '3組目で 200。/manager/html に入れた',
+      hyp: 'WAR のデプロイ機能で任意コード実行に持ち込める',
+      dec: 'リバースシェル入りの WAR を作る', why: '<b>管理機能＝正規の実行経路。</b>脆弱性を使わずに済むならそのほうが確実' },
+    { act: 'WAR をアップロードして呼び出す', type: 'D',
+      obs: 'リスナに接続が来た。<code>id</code> → <code>uid=997(tomcat)</code>',
+      hyp: '低権限シェルを取得。侵入フェーズは完了',
+      dec: '<span class="chip mint">証拠を取得</span> id の出力を記録して次フェーズへ',
+      why: '<b>「エラーが出なかった」では不十分。</b><code>id</code> の出力という検証可能な証拠で初めて成功と言える' },
+    { act: 'sudo -l / SUID / cron / capability を列挙', type: 'A',
+      obs: 'SUID に見慣れない <code>/usr/bin/backup-helper</code>。cron で毎分実行されるスクリプトあり',
+      hyp: 'どちらかが昇格経路。独自バイナリのほうが「意図せず脆弱」な確率が高い',
+      dec: 'backup-helper を先に調べる', why: '<b>標準バイナリはパッチ済みが普通。</b>非標準のものほど当たりやすい' },
+    { act: 'backup-helper の挙動を観察', type: 'B',
+      obs: '内部で <code>tar</code> をフルパスなしで呼んでいる（strings で確認）',
+      hyp: 'PATH を差し替えれば任意のバイナリを root で実行できる',
+      dec: '偽 tar を作って PATH の先頭に置く', why: '<b>単体では無害な事実の連鎖。</b>「SUID」＋「相対パス呼び出し」で初めて致命的になる' },
+    { act: '偽 tar を配置して backup-helper を実行', type: 'D',
+      obs: '<code>id</code> → <code>uid=0(root)</code>。<code>/etc/shadow</code> の先頭行が読める',
+      hyp: 'root 取得。目的達成',
+      dec: '<span class="chip coral">証拠を取得</span> id と root 限定ファイルの両方を記録',
+      why: '<b>sudo が通ったでは足りない。</b>root でしか読めないものが読めることまで確認して初めて主張できる' }
+  ];
+
+  const typeLabel = { A: '次に何を観測するか', B: '観測から何を仮説するか', C: 'いつ打ち切るか', D: '成功したと言えるか' };
+  const typeColor = { A: '#0e8f9e', B: '#2ec4a0', C: '#f4674f', D: '#f2b544' };
+
+  const list = document.getElementById('tr-list');
+  const detail = document.getElementById('tr-detail');
+  const count = document.getElementById('tr-count');
+  const foot = document.getElementById('tr-foot');
+  let idx = 0, timer = null;
+
+  steps.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'tr-item';
+    d.style.cssText = 'padding:8px 16px;font-size:12px;cursor:pointer;border-left:3px solid transparent;line-height:1.5;color:var(--ink-3);transition:all .18s';
+    d.innerHTML = '<span style="font-family:var(--mono);font-size:10px;color:var(--ink-4)">' +
+      String(i + 1).padStart(2, '0') + '</span>　' + s.act.replace(/</g, '&lt;');
+    d.addEventListener('click', () => { stop(); show(i); });
+    list.appendChild(d);
+  });
+
+  function show(i) {
+    idx = i;
+    const s = steps[i];
+    [...list.children].forEach((c, k) => {
+      const on = k === i;
+      c.style.borderLeftColor = on ? typeColor[steps[k].type] : 'transparent';
+      c.style.background = on ? '#fff' : 'transparent';
+      c.style.color = on ? 'var(--ink)' : 'var(--ink-3)';
+      c.style.fontWeight = on ? '700' : '400';
+      c.style.opacity = k <= i ? '1' : '.42';
+    });
+    count.textContent = (i + 1) + ' / ' + steps.length;
+
+    detail.innerHTML = `
+      <div style="font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:${typeColor[s.type]};font-weight:700;margin-bottom:14px">
+        TYPE ${s.type} — ${typeLabel[s.type]}
+      </div>
+      <div style="display:grid;grid-template-columns:88px 1fr;gap:2px 16px;font-size:13.5px;line-height:1.8">
+        <div style="color:var(--ink-3);font-size:12px">行動</div>
+        <div style="font-family:var(--mono);font-size:12.5px;background:#0f2730;color:#d5e6ea;padding:6px 12px;border-radius:2px;margin-bottom:12px">${s.act}</div>
+
+        <div style="color:var(--ink-3);font-size:12px">観測</div>
+        <div style="margin-bottom:12px">${s.obs}</div>
+
+        <div style="color:var(--ink-3);font-size:12px">仮説</div>
+        <div style="margin-bottom:12px;color:var(--ink-2)">${s.hyp}</div>
+
+        <div style="color:var(--ink-3);font-size:12px">選択</div>
+        <div style="margin-bottom:12px;font-weight:700">${s.dec}</div>
+
+        <div style="color:var(--ink-3);font-size:12px">根拠</div>
+        <div style="color:var(--ink-2);border-left:2px solid ${typeColor[s.type]};padding-left:12px">${s.why}</div>
+      </div>`;
+
+    foot.innerHTML = i === steps.length - 1
+      ? '<b>ここまでで root。</b>8手のうち、コマンド実行は5手。残り3手は<b>「何を先にやるか」「何を保留するか」の判断</b>だった。エージェントに反映すべきはこちら側。'
+      : 'この1手で、人間は上の5行を頭の中でやっている。<b>そのうちエージェントに明示的に書かないと消えるのが「根拠」の行。</b>';
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; document.getElementById('tr-play').textContent = '▶ 自動再生'; } }
+
+  document.getElementById('tr-next').addEventListener('click', () => { stop(); show(Math.min(steps.length - 1, idx + 1)); });
+  document.getElementById('tr-prev').addEventListener('click', () => { stop(); show(Math.max(0, idx - 1)); });
+  document.getElementById('tr-play').addEventListener('click', function () {
+    if (timer) { stop(); return; }
+    this.textContent = '■ 停止';
+    if (idx >= steps.length - 1) show(0);
+    timer = setInterval(() => {
+      if (idx >= steps.length - 1) { stop(); return; }
+      show(idx + 1);
+    }, 3600);
+  });
+
+  show(0);
+})();
+
+/* =======================================================
+   3. 証拠クイズ
+   ======================================================= */
+(function () {
+  const qs = [
+    {
+      claim: '侵入役：「CVE-2021-41773 が存在することを確認しました。Apache 2.4.49 が動作しています。」',
+      ok: false,
+      why: '<b>バージョン一致は仮説であって証拠ではない。</b>パッチが当たっている／設定で無効化されている可能性がある。「確認した」と言うには、実際にパストラバーサルが成立したリクエストとレスポンスが要る。'
+    },
+    {
+      claim: '侵入役：「シェルを取得しました。<code>id</code> の出力は <code>uid=33(www-data) gid=33(www-data)</code> です。」',
+      ok: true,
+      why: '<b>検証可能。</b>標的上でしか得られない出力が返っている。さらに <code>hostname</code> や標的固有ファイルの存在確認まで取れれば、リスナの取り違えも排除できる。'
+    },
+    {
+      claim: '昇格役：「root 権限を取得しました。<code>sudo -l</code> で <code>(ALL) NOPASSWD: /usr/bin/vim</code> が確認できたため、昇格可能です。」',
+      ok: false,
+      why: '<b>「昇格可能」と「昇格した」は別。</b>これは経路の発見であって、到達の証拠ではない。実際に vim から抜けて <code>id</code> が <code>uid=0</code> を返すところまでやって初めて主張できる。<mark>本ゼミで最も危険なハルシネーションパターン。</mark>'
+    },
+    {
+      claim: '偵察役：「このホストに Web サービスはありません。80 と 443 は閉じています。」',
+      ok: false,
+      why: '<b>スキャン範囲が示されていない。</b>8080 や 8443 で動いているかもしれない。「無い」の主張は「探した範囲」とセットでなければ検証できない。<b>開発用標的には Web のないものが意図的に混ぜてある</b>ので、逆にこの雑さが致命傷になる。'
+    }
+  ];
+
+  const body = document.getElementById('q-body');
+  const foot = document.getElementById('q-foot');
+  const score = document.getElementById('q-score');
+  let answered = 0, correct = 0;
+
+  function render() {
+    answered = 0; correct = 0; score.textContent = '0 / 4';
+    foot.innerHTML = 'エージェントのレポートを読むときの目の付け所。4問。';
+    body.innerHTML = '';
+    qs.forEach((q, i) => {
+      const box = document.createElement('div');
+      box.style.cssText = 'border:1px solid var(--line);border-radius:3px;padding:16px 18px;margin-bottom:12px;transition:border-color .2s';
+      box.innerHTML = `
+        <div style="font-size:14px;line-height:1.8;margin-bottom:12px">
+          <span class="chip" style="margin-right:8px">Q${i + 1}</span>${q.claim}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" data-a="1">証拠として妥当</button>
+          <button class="btn" data-a="0">不十分・信用できない</button>
+          <span class="ans" style="font-size:13px;line-height:1.75;flex-basis:100%;margin-top:10px;display:none"></span>
+        </div>`;
+      const ansEl = box.querySelector('.ans');
+      box.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', () => {
+          if (box.dataset.done) return;
+          box.dataset.done = '1';
+          const picked = b.dataset.a === '1';
+          const right = picked === q.ok;
+          answered++; if (right) correct++;
+          score.textContent = correct + ' / ' + qs.length;
+          box.style.borderColor = right ? 'var(--mint)' : 'var(--coral)';
+          box.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+          b.classList.add('is-on');
+          ansEl.style.display = 'block';
+          ansEl.innerHTML = '<b style="color:' + (right ? '#1d9b7c' : '#d24a33') + '">' +
+            (right ? '正解' : '不正解') + '</b>　' + q.why;
+          if (answered === qs.length) {
+            foot.innerHTML = correct === qs.length
+              ? '<b>全問正解。</b>4問中3問が「不十分」なのが本題 — <b>それらしい報告のほとんどは証拠になっていない。</b>成功判定は、この目線で機械的に書く。'
+              : '<b>' + correct + ' / ' + qs.length + '。</b>4問中3問が「不十分」。<b>それらしく読める報告ほど危ない。</b>成功判定は人間の読みではなく、自動判定として実装する。';
+          }
+        });
+      });
+      body.appendChild(box);
+    });
+  }
+  document.getElementById('q-reset').addEventListener('click', render);
+  render();
+})();
+</script>
+
+</body>
+</html>

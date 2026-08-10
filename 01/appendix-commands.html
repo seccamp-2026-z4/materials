@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>おまけ よく使うコマンド ｜ Z4 コマ1</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ1</b><span>SEMINAR MATERIALS</span></a>
+    <nav class="topnav">
+      <a href="index.html">概要</a>
+      <a href="lab-portal.html">⓪ ラボ環境</a>
+      <a href="lecture-01.html">① ペンテスト基礎</a>
+      <a href="lecture-02.html">② エージェント基礎</a>
+      <a href="lecture-03.html">③ マルチエージェント</a>
+      <a href="lecture-04.html">④ アーキテクチャ読解</a>
+      <a href="appendix-commands.html" class="is-current">おまけ コマンド</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">おまけ ／ 作業中に参照する早見表</p>
+  <h1>よく使うコマンド</h1>
+  <p class="lede">
+    コマ2以降の開発では、Git で変更を管理し、Docker で実行環境を扱い、SSH で標的や開発環境に接続する。
+    ここでは、作業中によく使うコマンドだけを用途別にまとめる。
+  </p>
+  <p class="lede">
+    迷ったら、まず「今どこにいるか」「何を変更したか」「どの環境で実行しているか」を確認する。
+    その確認に使うコマンドを先に覚えると、トラブルの切り分けが速くなる。
+  </p>
+</div>
+
+<section class="blk wrap rv">
+  <h2><span class="num">A1</span>Git — 変更を確認し、記録する</h2>
+  <p class="sec-lede">
+    Git は、ファイルの変更履歴を管理する道具。開発中は「何を変えたか」「どこまで戻れるか」を常に確認できるようにする。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:28%">やりたいこと</th><th style="width:34%">コマンド</th><th>見るところ</th></tr></thead>
+      <tbody>
+        <tr><td>リポジトリを取得する</td><td><code>git clone &lt;url&gt;</code></td><td>GitHub などから作業用ディレクトリを作る</td></tr>
+        <tr><td>今の状態を見る</td><td><code>git status</code></td><td>変更済み・追加済み・未追跡のファイルを確認する</td></tr>
+        <tr><td>差分を見る</td><td><code>git diff</code></td><td>まだステージしていない変更を見る</td></tr>
+        <tr><td>ステージ済みの差分を見る</td><td><code>git diff --staged</code></td><td>次のコミットに入る内容を見る</td></tr>
+        <tr><td>変更をステージする</td><td><code>git add &lt;file&gt;</code></td><td>コミットに含めるファイルを選ぶ</td></tr>
+        <tr><td>コミットする</td><td><code>git commit -m "message"</code></td><td>変更を履歴として記録する</td></tr>
+        <tr><td>履歴を見る</td><td><code>git log --oneline --graph</code></td><td>最近のコミットと分岐を見る</td></tr>
+        <tr><td>ブランチを見る</td><td><code>git branch</code></td><td>今いるブランチに <code>*</code> が付く</td></tr>
+        <tr><td>ブランチを作って移動する</td><td><code>git switch -c &lt;name&gt;</code></td><td>作業単位ごとにブランチを分ける</td></tr>
+        <tr><td>別ブランチへ移動する</td><td><code>git switch &lt;name&gt;</code></td><td>未コミットの変更があると移動できないことがある</td></tr>
+        <tr><td>リモートへ送る</td><td><code>git push</code></td><td>GitHub などに自分のコミットを送る</td></tr>
+        <tr><td>リモートから取る</td><td><code>git pull</code></td><td>他の人の変更を取り込む</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>基本の流れ</h3>
+  <pre><code># 0. リポジトリを取得する
+git clone https://github.com/example/repo.git
+cd repo
+
+# 1. 変更状況を見る
+git status
+
+# 2. 差分を確認する
+git diff
+
+# 3. コミットに含める
+git add src/agent.py
+
+# まとめてステージする場合
+git add .
+
+# 4. ステージ済みの差分を確認する
+git diff --staged
+
+# 5. 記録する
+git commit -m "Improve recon prompt"
+
+# 6. リモートへ送る
+git push</code></pre>
+
+  <div class="note warn">
+    <span class="lbl">注意</span>
+    <p><code>.env</code>、API トークン、VPN プロファイル、秘密鍵はコミットしない。
+    <code>git add .</code> は便利だが、不要なファイルもまとめて入る。
+    <code>git status</code> と <code>git diff --staged</code> を見てからコミットする。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">A2</span>Docker — 実行環境を起動し、確認する</h2>
+  <p class="sec-lede">
+    Docker は、アプリケーションを決まった環境で動かすための道具。手元の OS に依存しない実行環境を作れる。
+    本ゼミでは、テンプレート実装や補助サービスを動かすときに使う。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:28%">やりたいこと</th><th style="width:34%">コマンド</th><th>見るところ</th></tr></thead>
+      <tbody>
+        <tr><td>起動中のコンテナを見る</td><td><code>docker ps</code></td><td>コンテナ名、ポート、状態を確認する</td></tr>
+        <tr><td>停止中も含めて見る</td><td><code>docker ps -a</code></td><td>終了したコンテナや失敗した起動を確認する</td></tr>
+        <tr><td>イメージを見る</td><td><code>docker images</code></td><td>手元にあるイメージ名とタグを見る</td></tr>
+        <tr><td>ログを見る</td><td><code>docker logs &lt;container&gt;</code></td><td>起動エラーやアプリの出力を見る</td></tr>
+        <tr><td>コンテナの中に入る</td><td><code>docker exec -it &lt;container&gt; sh</code></td><td>中でファイルや環境変数を確認する</td></tr>
+        <tr><td>コンテナを止める</td><td><code>docker stop &lt;container&gt;</code></td><td>実行中のコンテナを停止する</td></tr>
+        <tr><td>コンテナを削除する</td><td><code>docker rm &lt;container&gt;</code></td><td>停止済みのコンテナを削除する</td></tr>
+        <tr><td>イメージを作る</td><td><code>docker build -t &lt;name&gt; .</code></td><td>今のディレクトリの <code>Dockerfile</code> から作る</td></tr>
+        <tr><td>コンテナを起動する</td><td><code>docker run --rm -it &lt;image&gt;</code></td><td><code>--rm</code> は終了時にコンテナを削除する</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>docker compose を使う場合</h3>
+  <pre><code># 起動する
+docker compose up
+
+# バックグラウンドで起動する
+docker compose up -d
+
+# ログを見る
+docker compose logs -f
+
+# 停止する
+docker compose down
+
+# イメージを作り直して起動する
+docker compose up --build</code></pre>
+
+  <div class="note">
+    <span class="lbl">切り分けの順番</span>
+    <p>まず <code>docker ps</code> で起動しているかを見る。起動していなければ <code>docker ps -a</code> と
+    <code>docker logs</code> を見る。ポートが合わない場合は、<code>PORTS</code> の列とアプリ側の設定を照合する。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">A3</span>SSH — リモート環境に接続する</h2>
+  <p class="sec-lede">
+    SSH は、別のマシンへ安全にログインしてコマンドを実行するための道具。
+    標的へのログイン、踏み台環境、開発用サーバへの接続で使う。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:28%">やりたいこと</th><th style="width:34%">コマンド</th><th>見るところ</th></tr></thead>
+      <tbody>
+        <tr><td>ユーザ名を指定して接続する</td><td><code>ssh user@host</code></td><td><code>user</code> はログイン先のユーザ名</td></tr>
+        <tr><td>ポートを指定する</td><td><code>ssh -p 2222 user@host</code></td><td>標準は 22 番。違う場合だけ指定する</td></tr>
+        <tr><td>秘密鍵を指定する</td><td><code>ssh -i key.pem user@host</code></td><td>鍵ファイルの権限が緩いと拒否される</td></tr>
+        <tr><td>接続の詳細を見る</td><td><code>ssh -v user@host</code></td><td>認証や鍵選択で詰まったときに使う</td></tr>
+        <tr><td>ファイルを送る</td><td><code>scp file user@host:/tmp/</code></td><td>ローカルからリモートへコピーする</td></tr>
+        <tr><td>ファイルを取る</td><td><code>scp user@host:/tmp/file .</code></td><td>リモートからローカルへコピーする</td></tr>
+        <tr><td>ポートフォワードする</td><td><code>ssh -L 8080:127.0.0.1:80 user@host</code></td><td>手元の 8080 を接続先の 80 に転送する</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>鍵を使うときの基本</h3>
+  <pre><code># 鍵ファイルの権限を絞る（Linux / macOS / WSL）
+chmod 600 key.pem
+
+# 鍵を指定して接続する
+ssh -i key.pem user@172.30.0.24
+
+# 接続できないときは詳細ログを見る
+ssh -v -i key.pem user@172.30.0.24</code></pre>
+
+  <div class="note warn">
+    <span class="lbl">よくある原因</span>
+    <p><code>Permission denied</code> は、ユーザ名・鍵・パスワード・接続先のいずれかが違うときに出る。
+    まず <code>ssh -v</code> で、どの鍵を試しているか、どの認証方式で失敗しているかを見る。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>最初に実行する確認コマンド</h2>
+  <div class="grid g3">
+    <div class="card tint2">
+      <h4>Git</h4>
+      <p><code>git status</code><br>今どのファイルを変更しているかを見る。</p>
+    </div>
+    <div class="card tint2">
+      <h4>Docker</h4>
+      <p><code>docker ps</code><br>コンテナが動いているかを見る。</p>
+    </div>
+    <div class="card tint2">
+      <h4>SSH</h4>
+      <p><code>ssh -v user@host</code><br>接続できない理由を詳しく見る。</p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <div class="pager">
+    <a href="lecture-04.html"><span class="dir">PREV</span><span class="nm">← 座学④ アーキテクチャ読解</span></a>
+    <a class="next" href="index.html"><span class="dir">BACK</span><span class="nm">コマ1 概要へ →</span></a>
+  </div>
+  <footer class="foot">
+    <span>Z4 ／ コマ1 おまけ よく使うコマンド</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

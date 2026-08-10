@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>座学④ テンプレート実装のアーキテクチャ読解 ｜ Z4 コマ1</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+<style>
+.filebox { cursor: pointer; }
+.filebox rect { transition: fill .22s, stroke-width .22s; }
+.qcard {
+  border: 1px solid var(--line); border-left: 3px solid var(--sand);
+  border-radius: 0 3px 3px 0; padding: 16px 18px; margin-bottom: 12px; background: #fff;
+}
+.qcard .q { font-weight: 700; font-size: 14.5px; margin-bottom: 8px; line-height: 1.6; }
+.qcard .a { font-size: 13.5px; color: var(--ink-2); line-height: 1.85; display: none; }
+.qcard .a.on { display: block; animation: fadeUp .3s both; }
+.qcard button {
+  font-family: var(--sans); font-size: 11.5px; border: 1px solid var(--line-2);
+  background: #fff; color: var(--ink-3); padding: 3px 12px; border-radius: 999px; cursor: pointer;
+}
+.qcard button:hover { border-color: var(--sand); color: #b8801a; }
+.pathchip {
+  font-family: var(--mono); font-size: 11px; background: #0f2730; color: #7fd8e8;
+  padding: 2px 8px; border-radius: 2px; letter-spacing: .02em; white-space: nowrap;
+}
+.callrow {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.75; padding: 3px 0;
+  opacity: 0; transition: opacity .3s;
+}
+.callrow.on { opacity: 1; }
+.promptbox {
+  font-family: var(--mono); font-size: 11px; line-height: 1.7;
+  background: #0f2730; color: #d5e6ea; padding: 12px 14px; border-radius: 3px;
+  max-height: 260px; overflow: auto; white-space: pre-wrap;
+}
+.promptbox .hl { color: #ffd479; }
+.promptbox .mut { color: #6d8b95; }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .twocol { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ1</b><span>SEMINAR MATERIALS</span></a>
+    <nav class="topnav">
+      <a href="index.html">概要</a>
+      <a href="lab-portal.html">⓪ ラボ環境</a>
+      <a href="lecture-01.html">① ペンテスト基礎</a>
+      <a href="lecture-02.html">② エージェント基礎</a>
+      <a href="lecture-03.html">③ マルチエージェント</a>
+      <a href="lecture-04.html" class="is-current">④ アーキテクチャ読解</a>
+      <a href="appendix-commands.html">おまけ コマンド</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">座学 ④ ／ 11:45 – 12:20 ／ このコマの中心</p>
+  <h1>テンプレート実装の<br>アーキテクチャ読解</h1>
+  <p class="lede">
+    配布される <span class="pathchip">z4_multiagent_templates</span> を読む。
+    <a href="lecture-02.html">座学②</a><a href="lecture-03.html">③</a>で扱った概念が、
+    <strong>実物のコードでどの行になっているか</strong>を突き合わせていく。
+  </p>
+  <p class="lede">
+    このテンプレートの設計目標はひとつ。<mark>各エージェントを1ファイルに閉じ込め、単独で開発・実行できるようにする</mark>こと。
+    以下で見る仕掛けは、ほぼ全部これを成立させるためにある。
+  </p>
+  <p class="lede">
+    配布直後のテンプレートは汎用的なサンプル実装だが、このゼミではコマ2で
+    <strong>agent01=偵察、agent02=侵入、agent03=権限昇格</strong>に差し替える。
+    このページでは、その差し替え前提で読む。
+  </p>
+
+  <div class="note key" style="margin-top:28px">
+    <span class="lbl">読解の第一歩 — 検索2回で構造の8割が見える</span>
+    <p>上から順に読むのは時間の無駄。<strong>まず2種類の検索をする。</strong></p>
+    <pre style="margin:12px 0 8px"><code><span class="c-cm"># ① エージェントが何体いて、それぞれ何を返すか → 粒度が分かる</span>
+grep -En <span class="c-st">"^(agent = Agent\(|orchestrator)"</span> *.py
+grep -n <span class="c-st">"output_type="</span> *.py
+
+<span class="c-cm"># ② 誰がどのツールを持っているか → ツール数と検証の有無が分かる</span>
+grep -En <span class="c-st">"@agent\.tool|@agent\.output_validator"</span> *.py
+
+<span class="c-cm"># PowerShell の例</span>
+Select-String -Path *.py -Pattern <span class="c-st">'^(agent = Agent\(|orchestrator)'</span>
+Select-String -Path *.py -Pattern <span class="c-st">'output_type='</span>
+Select-String -Path *.py -Pattern <span class="c-st">'@agent\.tool|@agent\.output_validator'</span></code></pre>
+    <p>答え合わせ：<strong>エージェントは4体</strong>（orchestrator ＋ agent01/02/03）、
+    <strong>ツールは1体あたり3個</strong>。<a href="lecture-03.html">座学③</a>で見た
+    「選択精度が保てる帯域」にきちんと収まっている。</p>
+  </div>
+</div>
+
+<!-- ============ 1. ファイル構成と責務 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">1</span>ファイル構成 — 依存の向きが設計そのもの</h2>
+  <p class="sec-lede">
+    このテンプレートで最も重要な一行は、README に書かれたこれ。<br>
+    <strong>「<code>agentXX.py</code> は他の <code>agentYY.py</code> を import しません。」</strong>
+    <mark>依存先は <code>config.py</code> だけ</mark>で、エージェント同士の接続はすべて <code>core.py</code> が行う。
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+flowchart TB
+  subgraph entry["入口（3通り）"]
+    W["WebUI<br/>templates/index.html"]
+    H["HTTP<br/>curl / 外部サービス"]
+    C["CLI<br/>python core.py …"]
+  end
+
+  subgraph core["core.py — 接続を担当する唯一の場所"]
+    F["Flask API<br/>/api/chat · /api/pipeline<br/>/api/agents/[name]"]
+    O["orchestrator<br/>委譲方式（LLM が判断）"]
+    P["run_pipeline<br/>決め打ち順序"]
+    R["AGENT_MODULES<br/>レジストリ"]
+  end
+
+  subgraph subs["サブエージェント — 1ファイル＝1エージェント"]
+    A1["agent01.py<br/>偵察"]
+    A2["agent02.py<br/>侵入"]
+    A3["agent03.py<br/>権限昇格"]
+  end
+
+  CFG["config.py<br/>Settings · build_model · AppDeps<br/>AgentOutput · AgentCard · AgentModule<br/>track_run · Artifact · RecordingAgent"]
+  HIS["history.py<br/>SQLite 永続化"]
+
+  W --> F
+  H --> F
+  C --> core
+  F --> O
+  F --> P
+  F --> R
+  O -->|delegate_task| subs
+  P -->|01 → 02 → 03| subs
+  R -.->|単体実行| subs
+
+  A1 -.-> CFG
+  A2 -.-> CFG
+  A3 -.-> CFG
+  core -.-> CFG
+  F -.-> HIS
+
+  A1 -.-x A2
+  A2 -.-x A3
+
+  classDef e fill:#f6fbfc,stroke:#cddde2,color:#365360
+  classDef c fill:#f0faf6,stroke:#2ec4a0,color:#10262e
+  classDef s fill:#fdf8f1,stroke:#f2b544,color:#10262e
+  classDef g fill:#ffffff,stroke:#0e8f9e,color:#10262e
+  class W,H,C e
+  class F,O,P,R c
+  class A1,A2,A3 s
+  class CFG,HIS g
+      </div>
+    </div>
+    <figcaption><b>図4-1</b>　<b>× が付いた線は「存在しない依存」</b> — agent01 → agent02 の直接呼び出しは無い。
+    サブエージェントは<b>下向き（config.py）にだけ依存する</b>。この向きが崩れていないことが、1体ずつ独立に開発できる根拠。</figcaption>
+  </figure>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">ファイルをクリックすると、置くもの・置かないもの・触るときの注意が出る</span>
+      <span class="ctl"><span class="chip sea">クリックできる</span></span>
+    </div>
+    <div class="demo-body">
+      <div style="display:grid;grid-template-columns:1fr 1.05fr;gap:22px;align-items:start">
+        <svg id="fs-svg" viewBox="0 0 420 420" role="img" aria-label="ファイル構成"></svg>
+        <div id="fs-detail" style="font-size:13.5px;line-height:1.85"></div>
+      </div>
+    </div>
+    <div class="demo-foot" id="fs-foot"></div>
+  </div>
+
+  <div class="note">
+    <span class="lbl">エージェント間でデータを渡す口は2つだけ</span>
+    <div class="tbl-wrap" style="margin:12px 0 0">
+      <table>
+        <thead><tr><th style="width:32%">渡すもの</th><th>経路</th></tr></thead>
+        <tbody>
+          <tr><td><strong>テキスト・構造化データ</strong></td>
+              <td>呼び出し側（<code>core.py</code>）が<strong>次のエージェントのプロンプトに埋め込む</strong>。
+              JSON にして丸ごと差し込む（→ 3節）</td></tr>
+          <tr><td><strong>ファイル（ログ・証拠ファイルなど）</strong></td>
+              <td><code>deps.artifacts</code> に登録し、後段が証拠確認ツールで拾う（→ 7節）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:12px"><strong>この2つ以外の経路が生えていないか</strong>が、読むときの検査項目。
+    グローバル変数やモジュール間 import が1つでもあると、独立開発が崩れる。</p>
+  </div>
+</section>
+
+<!-- ============ 2. AgentModule ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">2</span>AgentModule プロトコル — agentXX.py を同じ形で扱う約束</h2>
+  <p class="sec-lede">
+    <code>core.py</code> は、<code>agent01.py</code> の中身を詳しく読みに行かない。
+    見るのは <code>NAME</code>、<code>CARD</code>、<code>agent</code>、<code>run()</code> の4つだけ。
+    <mark>この4つが揃っていれば、core.py は「これは呼び出せるエージェントだ」と判断できる。</mark>
+  </p>
+  <p>
+    つまり AgentModule は「実装の中身」ではなく、<strong>他のファイルから見える入口の形</strong>を決める約束。
+    Python のクラス継承ではなく、必要な名前と関数が揃っているかを見るための型だと考えると分かりやすい。
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <svg viewBox="0 0 880 268" role="img" aria-label="AgentModule プロトコルの4要素">
+        <defs>
+          <marker id="pah" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 z" fill="#9fb2ba"/>
+          </marker>
+        </defs>
+
+        <text class="svg-mono" x="30" y="24" fill="#0e8f9e">config.AgentModule (Protocol)</text>
+
+        <g>
+          <rect x="30" y="40" width="196" height="92" rx="3" fill="#fff" stroke="#0e8f9e" stroke-width="1.5"/>
+          <rect x="30" y="40" width="3" height="92" fill="#0e8f9e"/>
+          <text class="svg-mono" x="46" y="62" font-size="11" fill="#0e8f9e">NAME: str</text>
+          <text class="svg-sub" x="46" y="82">"agent01" — 識別子</text>
+          <text class="svg-sub" x="46" y="100" font-size="9.5">レジストリのキー・URL の一部・</text>
+          <text class="svg-sub" x="46" y="115" font-size="9.5">trace / runs のラベルになる</text>
+
+          <rect x="242" y="40" width="196" height="92" rx="3" fill="#fff" stroke="#14b8c4" stroke-width="1.5"/>
+          <rect x="242" y="40" width="3" height="92" fill="#14b8c4"/>
+          <text class="svg-mono" x="258" y="62" font-size="11" fill="#14b8c4">CARD: AgentCard</text>
+          <text class="svg-sub" x="258" y="82">title / description / tags</text>
+          <text class="svg-sub" x="258" y="100" font-size="9.5">委譲先の説明文になり、</text>
+          <text class="svg-sub" x="258" y="115" font-size="9.5">WebUI のタブも自動生成される</text>
+
+          <rect x="454" y="40" width="196" height="92" rx="3" fill="#fff" stroke="#2ec4a0" stroke-width="1.5"/>
+          <rect x="454" y="40" width="3" height="92" fill="#2ec4a0"/>
+          <text class="svg-mono" x="470" y="62" font-size="11" fill="#1d9b7c">agent: Agent</text>
+          <text class="svg-sub" x="470" y="82">pydantic_ai.Agent 本体</text>
+          <text class="svg-sub" x="470" y="100" font-size="9.5">プロンプト・ツール・出力型・</text>
+          <text class="svg-sub" x="470" y="115" font-size="9.5">モデル設定が全部ここに入る</text>
+
+          <rect x="666" y="40" width="184" height="92" rx="3" fill="#fff" stroke="#f2b544" stroke-width="1.5"/>
+          <rect x="666" y="40" width="3" height="92" fill="#f2b544"/>
+          <text class="svg-mono" x="682" y="62" font-size="11" fill="#b8801a">run(...)</text>
+          <text class="svg-sub" x="682" y="82">async な呼び出し口</text>
+          <text class="svg-sub" x="682" y="100" font-size="9.5">usage / usage_limits /</text>
+          <text class="svg-sub" x="682" y="115" font-size="9.5">message_history を受ける</text>
+        </g>
+
+        <text class="svg-mono" x="30" y="176" fill="#9fb2ba">この4つだけで動く側</text>
+        <g>
+          <rect x="30" y="188" width="196" height="52" rx="3" fill="#f6fbfc" stroke="#cddde2"/>
+          <text class="svg-label" x="46" y="210" font-weight="700" font-size="12">core.py</text>
+          <text class="svg-sub" x="46" y="228" font-size="9.5">委譲・パイプライン・API・CLI</text>
+
+          <rect x="242" y="188" width="196" height="52" rx="3" fill="#f6fbfc" stroke="#cddde2"/>
+          <text class="svg-label" x="258" y="210" font-weight="700" font-size="12">tests/</text>
+          <text class="svg-sub" x="258" y="228" font-size="9.5">契約テスト isinstance(…)</text>
+
+          <rect x="454" y="188" width="196" height="52" rx="3" fill="#f6fbfc" stroke="#cddde2"/>
+          <text class="svg-label" x="470" y="210" font-weight="700" font-size="12">単体実行</text>
+          <text class="svg-sub" x="470" y="228" font-size="9.5">python core.py --agent name</text>
+
+          <rect x="666" y="188" width="184" height="52" rx="3" fill="#f6fbfc" stroke="#cddde2"/>
+          <text class="svg-label" x="682" y="210" font-weight="700" font-size="12">WebUI</text>
+          <text class="svg-sub" x="682" y="228" font-size="9.5">/api/agents からタブ生成</text>
+        </g>
+
+        <path class="svg-arrow" d="M128,132 L128,184" marker-end="url(#pah)"/>
+        <path class="svg-arrow" d="M340,132 L340,184" marker-end="url(#pah)"/>
+        <path class="svg-arrow" d="M552,132 L552,184" marker-end="url(#pah)"/>
+        <path class="svg-arrow" d="M758,132 L758,184" marker-end="url(#pah)"/>
+
+        <text class="svg-sub" x="440" y="262" text-anchor="middle" fill="#365360">
+          agent04.py を作ってレジストリに1行足すだけで、core.py・tests・単体実行・WebUI が同じ形で扱える</text>
+      </svg>
+    </div>
+    <figcaption><b>図4-2</b>　<b>agentXX.py は「中身を自由に変えてよい部分」と「外から見える入口」の2層に分かれる。</b>
+    AgentModule が決めているのは後者だけ。逆に言えば <mark>この4つ以外のものに core.py が依存し始めた瞬間に、独立性は壊れる</mark>。</figcaption>
+  </figure>
+
+  <span class="code-cap">agent01.py の頭 — 契約部分だけを抜き出すとこれだけ</span>
+  <pre><code>NAME = <span class="c-st">"agent01"</span>
+
+CARD = AgentCard(
+    name=NAME,
+    title=<span class="c-st">"偵察"</span>,
+    description=(<span class="c-st">"ポート、サービス、HTTP エンドポイント、技術スタックを列挙し、"</span>
+                 <span class="c-st">"脆弱性候補を evidence 付きの findings にまとめる。"</span>),
+    tags=[<span class="c-st">"recon"</span>, <span class="c-st">"enumeration"</span>, <span class="c-st">"pentest"</span>],
+    example_query=<span class="c-st">"10.10.10.5 の攻撃面を調べて"</span>,
+)
+
+agent = Agent(
+    build_model(NAME),              <span class="c-cm"># AGENT01_MODEL_NAME で個別に差し替えられる</span>
+    name=NAME,
+    deps_type=<span class="c-ty">AppDeps</span>,              <span class="c-cm"># ← 座学②の「依存の注入」</span>
+    output_type=<span class="c-ty">Agent01Output</span>,      <span class="c-cm"># ← 座学②の「出力の型」</span>
+    instructions=INSTRUCTIONS,
+    model_settings=build_model_settings(temperature=<span class="c-ty">0.1</span>),
+    retries=get_settings().max_retries,
+    capabilities=CAPABILITIES,      <span class="c-cm"># ネイティブ Web 検索（→ 8節）</span>
+)
+
+<span class="c-kw">async def</span> <span class="c-fn">run</span>(query, deps, *, usage=<span class="c-kw">None</span>, usage_limits=<span class="c-kw">None</span>, message_history=<span class="c-kw">None</span>):
+    <span class="c-kw">async with</span> track_run(deps, NAME, query) <span class="c-kw">as</span> record:   <span class="c-cm"># ← 記録（→ 6節）</span>
+        result = <span class="c-kw">await</span> agent.run(query, deps=deps, usage=usage,
+                                  usage_limits=usage_limits <span class="c-kw">or</span> build_usage_limits(),
+                                  message_history=message_history)
+        record.set_output(result.output)
+        <span class="c-kw">return</span> result.output
+</code></pre>
+
+  <div class="note key">
+    <span class="lbl">担当ごとの見どころ</span>
+    <p><strong>自分が担当するファイルは、この <code>run()</code> の形を絶対に崩さないこと。</strong>
+    <code>usage</code> を受け取らなくしたり、<code>track_run</code> を外したりすると、
+    <mark>委譲・予算集計・WebUI の表示が同時に壊れる</mark>。中身（プロンプト・ツール・出力型）はいくら変えてもよい。</p>
+  </div>
+</section>
+
+<!-- ============ 3. 2つの実行モード ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">3</span>2つの実行モード — 委譲と決め打ち</h2>
+  <p class="sec-lede">
+    同じ3体のエージェントを、<strong>2通りの繋ぎ方</strong>で動かせる。
+    <a href="lecture-03.html">座学③</a>で扱った「トポロジ」の実例が、そのまま両方入っている。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">同じ依頼を2つのモードで流す</span>
+      <span class="ctl">
+        <div class="seg" id="md-seg">
+          <button data-v="0" class="is-on">委譲（/api/chat）</button>
+          <button data-v="1">決め打ち（/api/pipeline）</button>
+        </div>
+        <button class="btn primary" id="md-next">次へ →</button>
+        <button class="btn" id="md-reset">リセット</button>
+        <span class="rng-lbl" id="md-c">0 / 0</span>
+      </span>
+    </div>
+    <div class="demo-body" style="padding:0">
+      <div class="twocol" style="gap:0">
+        <div style="padding:18px 20px;border-right:1px solid var(--line)">
+          <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:10px">CALL TREE</div>
+          <div id="md-tree" style="min-height:220px"></div>
+        </div>
+        <div style="padding:18px 20px;background:var(--paper-2)">
+          <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:10px">
+            そのエージェントが受け取るプロンプト
+          </div>
+          <div id="md-prompt" class="promptbox">（「次へ」を押してください）</div>
+        </div>
+      </div>
+    </div>
+    <div class="demo-foot" id="md-foot"></div>
+  </div>
+
+  <div class="twocol">
+    <div class="card" style="border-color:rgba(46,196,160,.4)">
+      <span class="k" style="color:#1d9b7c">委譲方式 — <code>run_orchestrator()</code></span>
+      <h4>LLM が呼ぶ相手と回数を決める</h4>
+      <p><strong>強み</strong>：依頼が毎回違っても対応できる。不要なエージェントは呼ばない。<br>
+      <strong>弱み</strong>：<mark>実行内容が毎回変わる</mark>。評価しづらく、再現性が低い。<br><br>
+      委譲ツールは<strong><code>delegate_task(agent_name, task)</code> 1つだけ</strong>。
+      宛先は引数で指定する。<a href="lecture-03.html">座学③</a>の「ツール数を増やさない」工夫がここに効いている。</p>
+    </div>
+    <div class="card" style="border-color:rgba(242,181,68,.45)">
+      <span class="k" style="color:#b8801a">決め打ち順序 — <code>run_pipeline()</code></span>
+      <h4>コードが順序を決める</h4>
+      <p><strong>強み</strong>：必ず <code>01 → 02 → 03</code>。<mark>再現性があり、段ごとに型付きの中間結果が手に入る</mark>ので評価しやすい。<br>
+      <strong>弱み</strong>：不要な段も必ず通る。柔軟性がない。<br><br>
+      前段の出力は <code>model_dump_json(indent=2)</code> で<strong>そのままプロンプトに埋め込まれる</strong>。
+      伝言ゲームの余地がない。</p>
+    </div>
+  </div>
+
+  <span class="code-cap">core.py — 決め打ち順序の実装（前段の出力の受け渡し方に注目）</span>
+  <pre><code><span class="c-kw">async def</span> <span class="c-fn">run_pipeline</span>(query: <span class="c-ty">str</span>, deps: <span class="c-ty">AppDeps</span>) -> <span class="c-ty">RunResult</span>:
+    usage = RunUsage()
+    limits = build_usage_limits()
+
+    <span class="c-kw">async with</span> track_run(deps, <span class="c-st">"pipeline"</span>, query) <span class="c-kw">as</span> record:
+        recon = <span class="c-kw">await</span> agent01.run(query, deps, usage=usage, usage_limits=limits)
+
+        exploit_prompt = (
+            <span class="c-st">f"# 依頼\n{query}\n\n"</span>
+            <span class="c-st">f"# 偵察結果 (agent01)\n{recon.model_dump_json(indent=2)}\n\n"</span>   <span class="c-cm"># ← 丸ごと埋め込む</span>
+            <span class="c-st">"上記の候補から、承認ゲートを通して侵入可否を検証してください。"</span>
+        )
+        foothold = <span class="c-kw">await</span> agent02.run(exploit_prompt, deps, usage=usage, usage_limits=limits)
+
+        privesc_prompt = (
+            <span class="c-st">f"# 依頼\n{query}\n\n"</span>
+            <span class="c-st">f"# 偵察結果 (agent01)\n{recon.model_dump_json(indent=2)}\n\n"</span>
+            <span class="c-st">f"# 侵入結果 (agent02)\n{foothold.model_dump_json(indent=2)}\n\n"</span>
+            <span class="c-st">"取得済みの足がかりを使って権限昇格を試み、証拠を残してください。"</span>
+        )
+        privesc = <span class="c-kw">await</span> agent03.run(privesc_prompt, deps, usage=usage, usage_limits=limits)
+
+        output = PipelineOutput(query=query, recon=recon, foothold=foothold, privesc=privesc)
+        record.set_output(output)
+        <span class="c-kw">return</span> RunResult(output, usage)     <span class="c-cm"># usage は3体ぶんが合算されている</span>
+</code></pre>
+
+  <div class="note warn">
+    <span class="lbl">読むときの問い</span>
+    <p><strong>同じ <code>usage</code> オブジェクトを3体に渡し回している</strong>のが分かるか。
+    これで<a href="lecture-03.html">座学③</a>の「予算を実行ツリー全体で数える」が成立している。
+    <mark>片方だけ新しい <code>RunUsage()</code> を作ってしまうと、合計が過小に見えて上限が効かなくなる。</mark></p>
+  </div>
+</section>
+
+<!-- ============ 4. 委譲の実装 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">4</span>委譲の実装 — SubAgents と RecordingAgent</h2>
+  <p class="sec-lede">
+    <a href="lecture-03.html">座学③</a>では「委譲ツールの中で別の Agent を <code>run</code> する」と説明したが、
+    このテンプレートは<strong>委譲ツールを手書きしていない</strong>。
+    <code>pydantic-ai-harness</code> の <code>SubAgents</code> に宣言するだけで生成される。
+  </p>
+
+  <span class="code-cap">core.py — 委譲は「宣言」で済む。新エージェントの追加はリストに1行</span>
+  <pre><code>SUBAGENTS = [
+    SubAgent(
+        RecordingAgent(module.agent, module.NAME),      <span class="c-cm"># ← 入出力を記録するラッパー（後述）</span>
+        name=module.NAME,
+        description=<span class="c-st">f"{module.CARD.title}: {module.CARD.description}"</span>,   <span class="c-cm"># ← CARD がここで効く</span>
+        usage_limits=build_usage_limits(),              <span class="c-cm"># 委譲1回あたりの上限</span>
+        timeout_seconds=get_settings().api_timeout,     <span class="c-cm"># 時間切れ</span>
+        max_calls=<span class="c-ty">2</span>,                                 <span class="c-cm"># 同じ相手を呼べる回数 ← ループ抑制</span>
+        on_failure=(<span class="c-st">f"{module.NAME} の委譲に失敗しました。"</span>
+                    <span class="c-st">"これは回復可能な事象として扱い、手元の情報で判断を続けてください。"</span>),
+    )
+    <span class="c-kw">for</span> module <span class="c-kw">in</span> AGENT_MODULES.values()      <span class="c-cm"># ← レジストリから自動生成</span>
+]
+
+orchestrator: <span class="c-ty">Agent</span>[<span class="c-ty">AppDeps</span>, <span class="c-ty">OrchestratorOutput</span>] = Agent(
+    build_model(ORCHESTRATOR_NAME),
+    ...
+    capabilities=[
+        SubAgents(
+            agents=SUBAGENTS,
+            agent_folders=<span class="c-kw">None</span>,       <span class="c-cm"># ディスクからの自動読み込みは切る（登録場所を1つに集約）</span>
+            forward_usage=<span class="c-kw">True</span>,      <span class="c-cm"># ← 親の usage を子へ。ツリー全体で上限判定</span>
+        )
+    ],
+)
+</code></pre>
+
+  <h3>SubAgent 宣言の4つのつまみは、そのまま座学③の設計判断</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:24%">宣言</th><th style="width:26%">座学③のどの話か</th><th>変えたときに何が起きるか</th></tr></thead>
+      <tbody>
+        <tr><td><code>usage_limits</code></td><td><strong>予算配分</strong></td>
+            <td>1回の委譲で使える上限。小さすぎると仕事が終わる前に切れ、大きすぎると1体が全部食う</td></tr>
+        <tr><td><code>max_calls=2</code></td><td><strong>ループ検知</strong></td>
+            <td>同じ相手を3回目に呼べなくなる。<mark>もっとも安いループ対策</mark>。増やすと同じ手の反復が増える</td></tr>
+        <tr><td><code>timeout_seconds</code></td><td><strong>失敗回復</strong></td>
+            <td>子が固まっても親が進める。無いと全体が止まる</td></tr>
+        <tr><td><code>on_failure</code></td><td><strong>失敗回復（層3）</strong></td>
+            <td>失敗をモデルに<strong>どう伝えるか</strong>。「回復可能な事象として扱え」と書いてあるのがポイント —
+            これが無いとモデルは失敗を致命的と解釈して止まる</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>1回の委譲で何が起きているか</h3>
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">delegate_task 一往復の分解</span>
+      <span class="ctl">
+        <button class="btn primary" id="dg-play">▶ 再生</button>
+        <button class="btn" id="dg-next">1ステップ</button>
+        <button class="btn" id="dg-reset">リセット</button>
+        <span class="rng-lbl" id="dg-c">0 / 8</span>
+      </span>
+    </div>
+    <div class="demo-body" style="padding:0">
+      <div class="twocol" style="gap:0">
+        <div style="padding:16px 10px;border-right:1px solid var(--line)">
+          <svg id="dg-svg" viewBox="0 0 400 360" role="img" aria-label="委譲1往復のシーケンス"></svg>
+        </div>
+        <div style="padding:20px 22px" id="dg-detail"></div>
+      </div>
+    </div>
+    <div class="demo-foot" id="dg-foot">「1回の委譲」がコード上でどう展開されるかを追う。</div>
+  </div>
+
+  <h3>RecordingAgent がなぜ必要か</h3>
+  <p>
+    ここは<strong>実装の都合から生まれた仕掛け</strong>で、しかも読み飛ばすと後で必ず混乱する。
+    <code>SubAgents</code> は各サブエージェントの <code>Agent.run()</code> を<strong>直接</strong>呼ぶ。
+    つまり <mark><code>agent01.run()</code>（＝<code>track_run</code> で包んだ関数）を通らない</mark>。
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+flowchart LR
+  subgraph bad["ラッパー無し — 記録が落ちる"]
+    O1["orchestrator"] -->|SubAgents| G1["agent01.agent.run()<br/><i>pydantic_ai.Agent 本体</i>"]
+    G1 -.->|通らない| T1["agent01.run()<br/>track_run(...)"]
+    G1 --> R1["deps.runs<br/><b>空のまま</b>"]
+  end
+
+  subgraph good["RecordingAgent 経由 — 記録が残る"]
+    O2["orchestrator"] -->|SubAgents| W2["RecordingAgent<br/><i>WrapperAgent</i>"]
+    W2 -->|track_run で包む| G2["agent01.agent.run()"]
+    W2 --> R2["deps.runs<br/><b>入出力が残る</b>"]
+  end
+
+  classDef b fill:#fff6f3,stroke:#f4674f,color:#10262e
+  classDef g fill:#f0faf6,stroke:#2ec4a0,color:#10262e
+  class O1,G1,T1,R1 b
+  class O2,W2,G2,R2 g
+      </div>
+    </div>
+    <figcaption><b>図4-4</b>　<code>RecordingAgent</code> は <code>WrapperAgent</code> を継承し、<code>run()</code> を横取りして
+    <code>track_run</code> で包み直すだけのクラス。<b>これが無いと、委譲方式のときだけ WebUI の「エージェント実行」が空になる。</b></figcaption>
+  </figure>
+
+  <span class="code-cap">config.py — 20行足らずのラッパー</span>
+  <pre><code><span class="c-kw">class</span> <span class="c-ty">RecordingAgent</span>(WrapperAgent[<span class="c-ty">Any</span>, <span class="c-ty">Any</span>]):
+    <span class="c-kw">def</span> <span class="c-fn">__init__</span>(self, wrapped, name: <span class="c-ty">str</span>) -> <span class="c-kw">None</span>:
+        <span class="c-fn">super</span>().__init__(wrapped)
+        self._record_name = name
+
+    <span class="c-kw">async def</span> <span class="c-fn">run</span>(self, user_prompt=<span class="c-kw">None</span>, **kwargs):
+        deps = kwargs.get(<span class="c-st">"deps"</span>)
+        <span class="c-kw">if not isinstance</span>(deps, AppDeps):          <span class="c-cm"># 記録先が無ければ素通し</span>
+            <span class="c-kw">return await</span> self.wrapped.run(user_prompt, **kwargs)
+
+        <span class="c-kw">async with</span> track_run(deps, self._record_name, <span class="c-ty">str</span>(user_prompt <span class="c-kw">or</span> <span class="c-st">""</span>)) <span class="c-kw">as</span> record:
+            result = <span class="c-kw">await</span> self.wrapped.run(user_prompt, **kwargs)
+            record.set_output(result.output)
+            <span class="c-kw">return</span> result
+</code></pre>
+
+  <div class="note key">
+    <span class="lbl">もうひとつ、実装が信用を作っている箇所</span>
+    <p><code>OrchestratorOutput.used_agents</code> は<strong>LLM の自己申告ではない</strong>。</p>
+    <pre style="margin:12px 0 8px"><code>output.used_agents = [run.agent <span class="c-kw">for</span> run <span class="c-kw">in</span> deps.runs <span class="c-kw">if</span> run.agent <span class="c-kw">in</span> AGENT_MODULES]</code></pre>
+    <p><mark>実際の実行記録から機械的に埋めている。</mark>
+    「使った」と言っているのに記録が無い／記録があるのに申告していない、という食い違いが原理的に起きない。
+    <a href="lecture-01.html">座学①</a>の「自己申告を信用しない」がコードで表現されている好例。</p>
+  </div>
+</section>
+
+<!-- ============ 5. AppDeps ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">5</span>AppDeps — 共有状態と依存注入</h2>
+  <p class="sec-lede">
+    <a href="lecture-02.html">座学②</a>で見た <code>deps_type</code> の実体。
+    <strong>全エージェント・全ツールが <code>ctx.deps</code> で触る唯一の共有物</strong>で、
+    <mark>ここに何が入っているかを把握すれば、エージェント間で何を共有できるかが分かる。</mark>
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+flowchart LR
+  subgraph deps["AppDeps（dataclass）"]
+    direction TB
+    S["settings: Settings<br/><i>.env の全設定</i>"]
+    H["http: AsyncClient<br/><i>共有 HTTP クライアント</i>"]
+    ID["session_id / user_id / locale<br/><i>実行の文脈</i>"]
+    TR["trace: list[TraceStep]<br/><i>何が起きたか</i>"]
+    RU["runs: list[AgentRunRecord]<br/><i>何を渡して何が返ったか</i>"]
+    AR["artifacts: list[Artifact]<br/><i>生成ファイル</i>"]
+    EX["extra: dict<br/><i>逃げ道</i>"]
+  end
+
+  A1["agent01<br/>web_fetch"] -->|"http を借用"| H
+  A1 -->|"record() で記録"| TR
+  A2["agent02<br/>run_python"] -->|"add_artifact"| AR
+  A3["agent03<br/>list_charts"] -->|"読む"| AR
+  CORE["core.py"] -->|"作る・読む"| deps
+  API["Flask レスポンス<br/>runs · trace · artifacts"] -.->|そのまま JSON 化| deps
+  HIS["history.py<br/>SQLite"] -.->|保存| deps
+
+  classDef d fill:#f0faf6,stroke:#2ec4a0,color:#10262e
+  classDef a fill:#fdf8f1,stroke:#f2b544,color:#10262e
+  classDef o fill:#f6fbfc,stroke:#0e8f9e,color:#10262e
+  class S,H,ID,TR,RU,AR,EX d
+  class A1,A2,A3 a
+  class CORE,API,HIS o
+      </div>
+    </div>
+    <figcaption><b>図4-5</b>　<code>AppDeps</code> は「設定・接続・文脈・記録・生成物」の5役を兼ねる。
+    <b>ツールが外界に触るときは必ずここを通る</b>ので、差し替えとテストが効く。</figcaption>
+  </figure>
+
+  <div data-tabs>
+    <div class="tabs">
+      <button class="is-on">なぜグローバルではダメか</button>
+      <button>エージェント固有の設定</button>
+      <button>ツールからの使い方</button>
+    </div>
+
+    <div class="tabpanel is-on">
+      <div class="grid g3">
+        <div class="card" style="border-color:rgba(244,103,79,.3)">
+          <h4>セッションが混ざる</h4>
+          <p><code>session_id</code> ごとに生成物の置き場が変わる（<code>artifact_dir()</code>）。
+          グローバルだと<strong>別セッションのグラフを掴む</strong>。</p>
+        </div>
+        <div class="card" style="border-color:rgba(244,103,79,.3)">
+          <h4>差し替えられない</h4>
+          <p>ツールを確認するときは、LLM 全体を動かさずに <code>port_scan(ctx, ...)</code> のような関数だけを呼びたい。
+          そのために、テスト用の <code>AppDeps</code> に偽物の HTTP クライアントや一時ディレクトリを入れて渡す。<br>
+          <strong>依存先がグローバル変数に固定されていると、テスト用の偽物に差し替えられず、本物の VPN・HTTP・ファイル置き場を使うしかなくなる。</strong></p>
+        </div>
+        <div class="card" style="border-color:rgba(244,103,79,.3)">
+          <h4>記録が落ちる</h4>
+          <p><code>deps.record()</code> を通らない実行は <code>trace</code> にも <code>runs</code> にも残らない。
+          <strong>WebUI から見えない処理</strong>が生まれる。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabpanel">
+      <p><code>config.py</code> に「個別エージェントの知識」を持ち込まないための工夫。
+      エージェント固有の設定は <code>Settings</code> にフィールドを足さず、<strong>汎用ヘルパー経由で読む</strong>。</p>
+      <pre><code><span class="c-cm"># config.py — 汎用の口だけを提供する（AGENT01_* を知らない）</span>
+<span class="c-kw">def</span> <span class="c-fn">agent_flag</span>(agent_key: <span class="c-ty">str</span>, name: <span class="c-ty">str</span>, *, default: <span class="c-ty">bool</span> = <span class="c-kw">False</span>) -> <span class="c-ty">bool</span>: ...
+<span class="c-kw">def</span> <span class="c-fn">agent_int</span>(agent_key: <span class="c-ty">str</span>, name: <span class="c-ty">str</span>, *, default: <span class="c-ty">int</span>) -> <span class="c-ty">int</span>: ...
+
+<span class="c-cm"># agent01.py — 自分の設定は自分で読む（AGENT01_ENABLE_WEB_SEARCH）</span>
+ENABLE_WEB_SEARCH = agent_flag(NAME, <span class="c-st">"ENABLE_WEB_SEARCH"</span>, default=<span class="c-kw">True</span>)
+WEB_FETCH_MAX_CHARS = agent_int(NAME, <span class="c-st">"WEB_FETCH_MAX_CHARS"</span>, default=<span class="c-ty">4000</span>)
+
+<span class="c-cm"># agent02.py</span>
+ENABLE_PYTHON = agent_flag(NAME, <span class="c-st">"ENABLE_PYTHON"</span>, default=<span class="c-kw">True</span>)
+PYTHON_TIMEOUT = agent_int(NAME, <span class="c-st">"PYTHON_TIMEOUT"</span>, default=<span class="c-ty">30</span>)
+</code></pre>
+      <div class="note" style="margin-top:0">
+        <span class="lbl">この判断の意味</span>
+        <p>もし <code>Settings</code> に <code>agent01_enable_web_search</code> を足していたら、
+        <strong>agent01 を消したときに config.py も直す必要が出る</strong>。
+        <mark>1ファイル削除で完結しなくなった時点で、独立性は失われている。</mark></p>
+      </div>
+    </div>
+
+    <div class="tabpanel">
+      <pre><code><span class="c-de">@agent.tool</span>
+<span class="c-kw">async def</span> <span class="c-fn">web_fetch</span>(ctx: <span class="c-ty">RunContext</span>[<span class="c-ty">AppDeps</span>], url: <span class="c-ty">str</span>, max_chars: <span class="c-ty">int</span> = WEB_FETCH_MAX_CHARS):
+    <span class="c-st">"""公開 Web ページを取得し、タグを除いた本文テキストを返す。"""</span>
+    _validate_public_url(url)                        <span class="c-cm"># SSRF 検査（→ 8節）</span>
+
+    <span class="c-kw">try</span>:
+        response = <span class="c-kw">await</span> ctx.deps.http.get(url)     <span class="c-cm"># ← 共有クライアントを借りる</span>
+        response.raise_for_status()
+    <span class="c-kw">except</span> <span class="c-ty">Exception</span> <span class="c-kw">as</span> exc:
+        ctx.deps.record(NAME, <span class="c-st">"web_fetch_failed"</span>, url=url, error=<span class="c-ty">str</span>(exc))
+        <span class="c-kw">raise</span> ModelRetry(<span class="c-st">f"ページの取得に失敗しました: {exc}"</span>) <span class="c-kw">from</span> exc
+    ...
+    ctx.deps.record(NAME, <span class="c-st">"web_fetch"</span>, url=page.url, status=page.status, chars=<span class="c-fn">len</span>(page.text))
+    <span class="c-kw">return</span> page
+</code></pre>
+      <p><strong>失敗も成功も <code>deps.record()</code> している</strong>のがポイント。
+      これで WebUI のツール呼び出し一覧に「試したが失敗した」が残る。
+      <mark>失敗の記録がないと、何もしなかったのか失敗したのかが区別できない。</mark></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. 観測の2層 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">6</span>ログ設計 — trace と runs の2層</h2>
+  <p class="sec-lede">
+    <a href="lecture-03.html">座学③</a>で「ログはデバッグのためではなく切り分けのために設計する」と述べた。
+    このテンプレートは、その考え方を<strong>2つの別の型</strong>として実装している。
+    <mark>ここが読解のいちばんの収穫になるはず。</mark>
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">同じ1回の実行を、2つの記録で見る</span>
+      <span class="ctl">
+        <div class="seg" id="lg-seg">
+          <button data-v="0" class="is-on">trace — 何が起きたか</button>
+          <button data-v="1">runs — 何を渡して何が返ったか</button>
+        </div>
+      </span>
+    </div>
+    <div class="demo-body" id="lg-body" style="min-height:320px"></div>
+    <div class="demo-foot" id="lg-foot"></div>
+  </div>
+
+  <div class="twocol">
+    <div class="card">
+      <span class="k">TraceStep</span>
+      <h4>時系列の要約</h4>
+      <pre style="margin:8px 0 0;font-size:11.5px"><code><span class="c-kw">class</span> <span class="c-ty">TraceStep</span>(BaseModel):
+    agent: <span class="c-ty">str</span>
+    message: <span class="c-ty">str</span>       <span class="c-cm"># "start"/"done"/ツール名</span>
+    at: <span class="c-ty">str</span>
+    data: <span class="c-ty">dict</span>       <span class="c-cm"># 引数など</span></code></pre>
+      <p style="margin-top:12px"><strong>軽い。</strong>ざっと流れを見るとき用。
+      <code>deps.record()</code> が1行追加する。</p>
+    </div>
+    <div class="card">
+      <span class="k">AgentRunRecord</span>
+      <h4>入出力の全文</h4>
+      <pre style="margin:8px 0 0;font-size:11.5px"><code><span class="c-kw">class</span> <span class="c-ty">AgentRunRecord</span>(BaseModel):
+    agent: <span class="c-ty">str</span>
+    input: <span class="c-ty">str</span>        <span class="c-cm"># プロンプト全文</span>
+    output: <span class="c-ty">dict</span> | <span class="c-kw">None</span>
+    events: <span class="c-ty">list</span>[<span class="c-ty">TraceStep</span>]  <span class="c-cm"># ツール呼び出し</span>
+    duration_ms: <span class="c-ty">float</span> | <span class="c-kw">None</span>
+    error: <span class="c-ty">str</span> | <span class="c-kw">None</span></code></pre>
+      <p style="margin-top:12px"><strong>重い。</strong>だが<mark>「どの段で入力が壊れたか」はこれしか答えられない</mark>。
+      <code>track_run()</code> が管理する。</p>
+    </div>
+  </div>
+
+  <div class="note key">
+    <span class="lbl">なぜ2層に分けるのか</span>
+    <p>README にひとことで書かれている —
+    <strong>「マルチエージェントの不具合はほぼ全て『どの段で入力が壊れたか』です。」</strong><br><br>
+    <code>trace</code> だけでは「agent02 が呼ばれた」までしか分からない。
+    <mark>agent02 が受け取ったプロンプトに agent01 の findings が本当に入っていたか</mark>は <code>runs[].input</code> を見るしかない。
+    逆に <code>runs</code> だけだとツール呼び出しの前後関係が追いにくい。<strong>両方要る。</strong></p>
+  </div>
+
+  <h3>record() の地味だが効いている実装</h3>
+  <pre><code><span class="c-kw">def</span> <span class="c-fn">record</span>(self, agent: <span class="c-ty">str</span>, message: <span class="c-ty">str</span>, **data) -> <span class="c-kw">None</span>:
+    step = TraceStep(agent=agent, message=message, data=data)
+    self.trace.append(step)
+    <span class="c-kw">if</span> message <span class="c-kw">not in</span> (<span class="c-st">"start"</span>, <span class="c-st">"done"</span>, <span class="c-st">"error"</span>):
+        <span class="c-kw">for</span> run <span class="c-kw">in</span> <span class="c-fn">reversed</span>(self.runs):          <span class="c-cm"># ← 実行中の record を後ろから探す</span>
+            <span class="c-kw">if</span> run.agent == agent <span class="c-kw">and not</span> run.finished:
+                run.events.append(step)              <span class="c-cm"># ← そこにツール呼び出しをぶら下げる</span>
+                <span class="c-kw">break</span>
+</code></pre>
+  <p>
+    <strong>1回の <code>record()</code> で、時系列（<code>trace</code>）と実行単位（<code>runs[].events</code>）の両方に入る。</strong>
+    ツール呼び出しが「どのエージェントのどの実行で起きたか」に正しく紐づくのはこの5行のおかげ。
+    <mark>同じエージェントを2回呼んだときに、1回目と2回目のツール呼び出しが混ざらない</mark>のが要点。
+  </p>
+
+  <h3>失敗も記録に残す</h3>
+  <pre><code><span class="c-cm"># core.py の execute() — 例外が出ても履歴に書いてから再送出する</span>
+<span class="c-kw">try</span>:
+    result = runner.submit(coro_factory(deps, query), timeout=settings.api_timeout)
+<span class="c-kw">except</span> <span class="c-ty">Exception</span> <span class="c-kw">as</span> exc:
+    <span class="c-kw">if</span> store <span class="c-kw">is not</span> <span class="c-kw">None</span>:
+        store.add(HistoryEntry(..., ok=<span class="c-kw">False</span>, error=<span class="c-st">f"{type(exc).__name__}: {exc}"</span>,
+                               runs=deps.runs_dump(), trace=deps.trace_dump(), ...))
+    <span class="c-kw">raise</span>
+</code></pre>
+  <div class="note">
+    <span class="lbl">この判断が重要</span>
+    <p><strong>失敗こそ後から見返したい。</strong>成功だけ保存する実装をよく見かけるが、
+    <mark>改善作業で読みたいログは失敗した実行のほう</mark>。
+    しかも<strong>失敗した時点までの <code>runs</code> が残る</strong>ので、どこまで進んで落ちたかが分かる。</p>
+  </div>
+</section>
+
+<!-- ============ 7. Artifact ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">7</span>Artifact — エージェント間のファイル受け渡し</h2>
+  <p class="sec-lede">
+    テキストはプロンプトに埋め込めるが、<strong>画像は埋め込めない</strong>。
+    agent02 が作ったグラフを agent03 が本文に載せる、という連携をどう実装するか。
+    <mark>ここには「LLM に URL を捏造させない」ための仕掛けが入っている。</mark>
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+sequenceDiagram
+    autonumber
+    participant A2 as agent02
+    participant D as AppDeps.artifacts
+    participant FS as data/artifacts ディレクトリ
+    participant A3 as agent03
+    participant UI as WebUI / API
+
+    A2->>A2: run_python で matplotlib<br/>plt.savefig("hist.png")
+    A2->>FS: 一時ディレクトリから回収してコピー
+    A2->>D: deps.add_artifact(agent, path, caption)
+    Note over D: url = /api/artifacts/セッションID/hist.png
+    D-->>A2: Artifact（id / url / caption）
+    A2->>A2: output.charts に url を入れる
+    Note over A2: output_validator が<br/>deps.artifacts に無い url を拒否
+    A3->>D: list_charts ツールで一覧取得
+    D-->>A3: AvailableChart[]（url / caption / created_by）
+    A3->>A3: ![説明](url) を markdown に埋め込む
+    Note over A3: output_validator が<br/>捏造 url と未埋め込みを拒否
+    UI->>FS: GET /api/artifacts/... で画像取得
+      </div>
+    </div>
+    <figcaption><b>図4-7</b>　<b>ファイルの実体はディスク、参照は <code>deps.artifacts</code>、外部への口は URL</b> の3層。
+    agent02 と agent03 は互いを知らないまま、<code>deps.artifacts</code> を介してだけ繋がっている。</figcaption>
+  </figure>
+
+  <span class="code-cap">両側の output_validator — URL の捏造を機械的に弾く</span>
+  <pre><code><span class="c-cm"># agent02.py — 自分が作っていないグラフを報告できない</span>
+<span class="c-de">@agent.output_validator</span>
+<span class="c-kw">def</span> <span class="c-fn">_validate_charts</span>(ctx: <span class="c-ty">RunContext</span>[<span class="c-ty">AppDeps</span>], output: <span class="c-ty">Agent02Output</span>) -> <span class="c-ty">Agent02Output</span>:
+    known = {a.url <span class="c-kw">for</span> a <span class="c-kw">in</span> ctx.deps.artifacts}
+    unknown = [c.url <span class="c-kw">for</span> c <span class="c-kw">in</span> output.charts <span class="c-kw">if</span> c.url <span class="c-kw">not in</span> known]
+    <span class="c-kw">if</span> unknown:
+        <span class="c-kw">raise</span> ModelRetry(<span class="c-st">f"存在しないグラフ URL があります: {unknown}. "</span>
+                         <span class="c-st">"run_python が返した charts の url をそのまま使ってください。"</span>)
+    <span class="c-kw">return</span> output
+</code></pre>
+
+  <div class="note key">
+    <span class="lbl">これが<a href="lecture-01.html">座学①</a>の「証拠」の実装</span>
+    <p>「グラフを作りました」という<strong>自己申告を、実体の存在で検証している</strong>。
+    <code>deps.artifacts</code> に無い URL は、そもそも出力として受け付けない。<br><br>
+    <mark>同じ形が使える</mark> — 「〜を確認しました」と主張する出力に対して、
+    <strong>その根拠が <code>deps</code> のどこかに実在することを validator で確かめる</strong>。
+    このパターンは自分のエージェントにもそのまま移植できる。</p>
+  </div>
+</section>
+
+<!-- ============ 8. ツール層 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">8</span>ツール層 — 4種類のツールを見分ける</h2>
+  <p class="sec-lede">
+    <code>@agent.tool</code> が付いていれば全部同じ、ではない。
+    このテンプレートには<strong>実行場所の違う4種類</strong>が入っていて、
+    <mark>それぞれ失敗の仕方も、対策すべきことも違う。</mark>
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <svg viewBox="0 0 880 320" role="img" aria-label="4種類のツールの実行場所">
+        <defs>
+          <marker id="tah" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 z" fill="#9fb2ba"/>
+          </marker>
+        </defs>
+
+        <rect x="26" y="52" width="470" height="236" rx="4" fill="#f6fbfc" stroke="#0e8f9e"
+              stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text class="svg-mono" x="42" y="44" fill="#0e8f9e">このアプリのプロセス</text>
+
+        <rect x="46" y="72" width="200" height="88" rx="3" fill="#fff" stroke="#2ec4a0" stroke-width="1.5"/>
+        <rect x="46" y="72" width="3" height="88" fill="#2ec4a0"/>
+        <text class="svg-mono" x="62" y="94" font-size="10.5" fill="#1d9b7c">① @agent.tool_plain</text>
+        <text class="svg-label" x="62" y="116" font-weight="700" font-size="12">純粋な関数</text>
+        <text class="svg-sub" x="62" y="134" font-size="9.5">lookup_severity / count_characters</text>
+        <text class="svg-sub" x="62" y="150" font-size="9.5">ctx を取らない。副作用なし</text>
+
+        <rect x="266" y="72" width="210" height="88" rx="3" fill="#fff" stroke="#14b8c4" stroke-width="1.5"/>
+        <rect x="266" y="72" width="3" height="88" fill="#14b8c4"/>
+        <text class="svg-mono" x="282" y="94" font-size="10.5" fill="#0e8f9e">② @agent.tool</text>
+        <text class="svg-label" x="282" y="116" font-weight="700" font-size="12">deps を使う関数</text>
+        <text class="svg-sub" x="282" y="134" font-size="9.5">web_fetch / list_charts /</text>
+        <text class="svg-sub" x="282" y="150" font-size="9.5">search_knowledge_base</text>
+
+        <rect x="46" y="180" width="430" height="92" rx="3" fill="#fff6f3" stroke="#f4674f" stroke-width="1.5"/>
+        <rect x="46" y="180" width="3" height="92" fill="#f4674f"/>
+        <text class="svg-mono" x="62" y="202" font-size="10.5" fill="#d24a33">③ @agent.tool → 別プロセス</text>
+        <text class="svg-label" x="62" y="224" font-weight="700" font-size="12">run_python（任意コード実行）</text>
+        <text class="svg-sub" x="62" y="242" font-size="9.5">python -I のサブプロセス／使い捨て一時ディレクトリ</text>
+        <text class="svg-sub" x="62" y="258" font-size="9.5">timeout・RLIMIT・環境変数を渡さない</text>
+
+        <rect x="560" y="52" width="294" height="120" rx="4" fill="#fdf8f1" stroke="#f2b544"
+              stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text class="svg-mono" x="576" y="44" fill="#b8801a">LLM プロバイダ側</text>
+        <rect x="580" y="72" width="254" height="80" rx="3" fill="#fff" stroke="#f2b544" stroke-width="1.5"/>
+        <rect x="580" y="72" width="3" height="80" fill="#f2b544"/>
+        <text class="svg-mono" x="596" y="94" font-size="10.5" fill="#b8801a">④ NativeTool</text>
+        <text class="svg-label" x="596" y="116" font-weight="700" font-size="12">web_search</text>
+        <text class="svg-sub" x="596" y="134" font-size="9.5">WebSearchTool(optional=True)</text>
+        <text class="svg-sub" x="596" y="148" font-size="9.5">検索はプロバイダが実行する</text>
+
+        <rect x="560" y="196" width="294" height="76" rx="3" fill="#fff" stroke="#cddde2"/>
+        <text class="svg-mono" x="576" y="220">外界</text>
+        <text class="svg-sub" x="576" y="242">公開 Web（web_fetch が直接叩く）</text>
+        <text class="svg-sub" x="576" y="260" fill="#d24a33">内部ネットワークは _validate_public_url で遮断</text>
+
+        <path class="svg-arrow" d="M476,116 L576,116" marker-end="url(#tah)"/>
+        <path class="svg-arrow" d="M400,160 C400,220 556,190 556,224" fill="none" marker-end="url(#tah)"/>
+
+        <text class="svg-sub" x="440" y="308" text-anchor="middle" fill="#365360">
+          ①②はコードで完全に制御できる。③は分離が必要。④は制御できない（対応しないモデルもある）</text>
+      </svg>
+    </div>
+    <figcaption><b>図4-8</b>　<b>どこで実行されるかで、必要な安全策が変わる。</b>
+    ①②はテストで直接呼べる。③はプロセス分離。④は自分で書いていないので、対応可否だけ確認する。</figcaption>
+  </figure>
+
+  <h3>④ ネイティブツール — 制御できないぶん、縮退のさせ方が重要</h3>
+  <pre><code><span class="c-cm"># agent01.py</span>
+CAPABILITIES = [NativeTool(WebSearchTool(optional=<span class="c-kw">True</span>))] <span class="c-kw">if</span> ENABLE_WEB_SEARCH <span class="c-kw">else</span> []
+</code></pre>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:26%">設定</th><th style="width:20%"><code>web_search</code></th><th>挙動</th></tr></thead>
+      <tbody>
+        <tr><td><code>MODEL_API=responses</code>（既定）</td><td><span class="chip mint">使える</span></td><td>プロバイダが検索を実行して結果を返す</td></tr>
+        <tr><td><code>MODEL_API=chat</code></td><td><span class="chip coral">非対応</span></td>
+            <td><code>optional=True</code> により<strong>自動で無効化</strong>され、<code>web_fetch</code> だけで動く（縮退）</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note">
+    <span class="lbl">設計判断として読む</span>
+    <p><code>optional=True</code> は<strong>「機能が使えなくても止まらない」</strong>を選んだということ。
+    逆に <code>optional=False</code> にすれば、非対応モデルでは <code>UserError</code> で落ちる。<br>
+    <mark>どちらが正しいかはタスク次第。</mark>「検索できないなら意味がない」処理なら落ちるほうが安全で、
+    「あれば嬉しい」なら縮退が正しい。<strong>コメントにその理由が書かれているかを見る癖をつけるとよい。</strong></p>
+  </div>
+
+  <h3>③ run_python — 「サンドボックスではない」と明記してある</h3>
+  <div class="grid g3">
+    <div class="card"><span class="k">対策 1</span><h4>プロセス分離</h4><p>別プロセス（<code>python -I</code>）で実行。アプリのメモリに触れない。</p></div>
+    <div class="card"><span class="k">対策 2</span><h4>資源の上限</h4><p><code>timeout</code> / <code>RLIMIT_AS</code> / <code>RLIMIT_CPU</code> / <code>RLIMIT_FSIZE</code>（POSIX のみ）。</p></div>
+    <div class="card"><span class="k">対策 3</span><h4>環境変数の遮断</h4><p><code>OPENAI_API_KEY</code> を渡さない専用 env を組み立てる。<strong>テストで漏れないことまで検証</strong>。</p></div>
+  </div>
+  <div class="note warn">
+    <span class="lbl">読み落としてはいけない一文</span>
+    <p>README にこう書いてある — <strong>「⚠️ これはサンドボックスではありません。」</strong>
+    ネットワーク遮断はしていない。<mark>必ずコンテナ内で動かす。</mark>
+    信頼できない入力を扱うなら <code>AGENT02_ENABLE_PYTHON=false</code>。<br><br>
+    <strong>安全策の「効き目」と「限界」が両方書かれている</strong>のは良いドキュメントの条件。
+    自分が機能を足すときも、限界のほうを書くこと。</p>
+  </div>
+
+  <h3>② SSRF 検査 — ツールの引数はモデルが自由に決められる</h3>
+  <pre><code><span class="c-kw">def</span> <span class="c-fn">_validate_public_url</span>(url: <span class="c-ty">str</span>) -> <span class="c-ty">str</span>:
+    parsed = urlparse(url)
+    <span class="c-kw">if</span> parsed.scheme <span class="c-kw">not in</span> (<span class="c-st">"http"</span>, <span class="c-st">"https"</span>):        <span class="c-kw">raise</span> ModelRetry(...)
+    <span class="c-kw">if</span> parsed.username <span class="c-kw">or</span> parsed.password:              <span class="c-kw">raise</span> ModelRetry(...)
+    host = (parsed.hostname <span class="c-kw">or</span> <span class="c-st">""</span>).lower()
+    <span class="c-kw">if</span> host <span class="c-kw">in</span> _BLOCKED_HOSTS <span class="c-kw">or</span> host.endswith(_BLOCKED_SUFFIXES): <span class="c-kw">raise</span> ModelRetry(...)
+    <span class="c-kw">try</span>:
+        address = ipaddress.ip_address(host)
+    <span class="c-kw">except</span> <span class="c-ty">ValueError</span>:
+        <span class="c-kw">return</span> url                                        <span class="c-cm"># ホスト名はそのまま通す</span>
+    <span class="c-kw">if</span> address.is_private <span class="c-kw">or</span> address.is_loopback \
+       <span class="c-kw">or</span> address.is_link_local <span class="c-kw">or</span> address.is_reserved:  <span class="c-kw">raise</span> ModelRetry(...)
+    <span class="c-kw">return</span> url
+</code></pre>
+  <p>
+    <code>169.254.169.254</code>（クラウドのメタデータ）・<code>localhost</code>・プライベート IP・<code>.internal</code>・
+    認証情報付き URL を拒否している。<strong>コメントに限界も書いてある</strong> —
+    「DNS 解決までは見ていない」。<br>
+    <mark>ツールの引数は LLM が決める</mark>という事実から出発すると、この種の検査が必要になる理由が分かる。
+    テストでは<strong>7パターンの拒否</strong>を検証している。
+  </p>
+</section>
+
+<!-- ============ 9. 暴走防止 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">9</span>暴走防止 — 3重の壁と、エラーの出口</h2>
+  <p class="sec-lede">
+    <a href="lecture-03.html">座学③</a>のループ検知・予算配分が、ここでは<strong>3つの独立した制限</strong>として実装されている。
+    どれか1つではなく、<mark>効く条件が違うものを重ねている</mark>のが要点。
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <svg viewBox="0 0 880 246" role="img" aria-label="暴走防止の3重の壁">
+        <g>
+          <rect x="30" y="40" width="264" height="120" rx="3" fill="#fff" stroke="#2ec4a0" stroke-width="1.6"/>
+          <rect x="30" y="40" width="264" height="4" fill="#2ec4a0"/>
+          <text class="svg-mono" x="48" y="68" font-size="10.5" fill="#1d9b7c">WALL 1 — 回数</text>
+          <text class="svg-label" x="48" y="92" font-weight="700" font-size="13">max_calls = 2</text>
+          <text class="svg-sub" x="48" y="112" font-size="10">同じ相手を3回目に呼べない</text>
+          <text class="svg-sub" x="48" y="130" font-size="10">→ 同じ手の反復を最も安く止める</text>
+          <text class="svg-sub" x="48" y="150" font-size="9.5" fill="#9fb2ba">SubAgent 宣言（core.py）</text>
+
+          <rect x="308" y="40" width="264" height="120" rx="3" fill="#fff" stroke="#14b8c4" stroke-width="1.6"/>
+          <rect x="308" y="40" width="264" height="4" fill="#14b8c4"/>
+          <text class="svg-mono" x="326" y="68" font-size="10.5" fill="#0e8f9e">WALL 2 — 総量</text>
+          <text class="svg-label" x="326" y="92" font-weight="700" font-size="13">UsageLimits</text>
+          <text class="svg-sub" x="326" y="112" font-size="10">requests 15 / tokens 200,000</text>
+          <text class="svg-sub" x="326" y="130" font-size="10">→ forward_usage でツリー全体の合計</text>
+          <text class="svg-sub" x="326" y="150" font-size="9.5" fill="#9fb2ba">.env（USAGE_LIMIT_*）</text>
+
+          <rect x="586" y="40" width="264" height="120" rx="3" fill="#fff" stroke="#f2b544" stroke-width="1.6"/>
+          <rect x="586" y="40" width="264" height="4" fill="#f2b544"/>
+          <text class="svg-mono" x="604" y="68" font-size="10.5" fill="#b8801a">WALL 3 — 時間</text>
+          <text class="svg-label" x="604" y="92" font-weight="700" font-size="13">timeout_seconds</text>
+          <text class="svg-sub" x="604" y="112" font-size="10">委譲1回 / HTTP 1本（API_TIMEOUT）</text>
+          <text class="svg-sub" x="604" y="130" font-size="10">→ 固まった子を切り離して親は進む</text>
+          <text class="svg-sub" x="604" y="150" font-size="9.5" fill="#9fb2ba">SubAgent 宣言 / Settings</text>
+        </g>
+
+        <text class="svg-sub" x="440" y="196" text-anchor="middle" font-size="11" fill="#365360">
+          回数だけ・総量だけでは止まらないケースがある。<tspan font-weight="700">3つは互いの穴を埋め合っている</tspan></text>
+        <text class="svg-sub" x="440" y="222" text-anchor="middle" font-size="10">
+          例：1回の委譲が巨大な入力を読み続ける → WALL 1 は無効、WALL 2 か 3 が止める</text>
+      </svg>
+    </div>
+    <figcaption><b>図4-9</b>　<b>「効く条件が違う制限を重ねる」</b>が設計の型。
+    自分のエージェントに制限を足すときも、既存の壁がすり抜けるケースを考えてから足す。</figcaption>
+  </figure>
+
+  <h3>エラーは HTTP ステータスに対応づけて外へ出す</h3>
+  <p>
+    <a href="lecture-02.html">座学②</a>で「失敗を層に分ける」と述べた。
+    <code>core.py</code> はそれを<strong>Flask のエラーハンドラ</strong>として実装し、
+    <mark>症状を見ただけで原因の層が分かる</mark>ようにしている。
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:10%">status</th><th style="width:28%">例外</th><th>意味と、次に見る場所</th></tr></thead>
+      <tbody>
+        <tr><td><strong>400</strong></td><td><code>ValueError</code></td><td><code>query</code> が空。リクエスト側の問題</td></tr>
+        <tr><td><strong>404</strong></td><td>—</td><td>存在しないエージェント名。<code>AGENT_MODULES</code> を見る</td></tr>
+        <tr><td><strong>429</strong></td><td><code>UsageLimitExceeded</code></td>
+            <td><strong>暴走。</strong><mark><code>trace</code> を見て委譲の連鎖を確認する</mark>のが定石</td></tr>
+        <tr><td><strong>500</strong></td><td><code>AgentRunError</code></td><td>エージェント実行の失敗。<code>runs[].error</code> を見る</td></tr>
+        <tr><td><strong>502</strong></td><td><code>ModelHTTPError</code></td><td>LLM API 側のエラー。モデル設定（<code>MODEL_API</code> 等）を疑う</td></tr>
+        <tr><td><strong>504</strong></td><td><code>TimeoutError</code></td><td><code>API_TIMEOUT</code> 超過。段数を減らすか延ばす</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="note key">
+    <span class="lbl">この対応表が、切り分けの地図になる</span>
+    <p><strong>429 が出たらプロンプトを直す前に <code>trace</code> を読む。502 が出たらプロンプトは無関係。</strong><br>
+    <mark>症状 → 見る場所</mark>の対応が付いていると、改善のイテレーションが一気に速くなる。
+    自分でエージェントを足すときも、新しい失敗モードには専用のステータスか専用の記録を用意する。</p>
+  </div>
+</section>
+
+<!-- ============ 10. 拡張 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">10</span>agent04 を足す — 何が自動で追従するか</h2>
+  <p class="sec-lede">
+    ここまで見た仕掛けの<strong>見返り</strong>がこの節。
+    新しいエージェントを足すのに<mark>触るファイルは2つだけ</mark>で済む。
+  </p>
+
+  <figure class="fig">
+    <div class="fig-body">
+      <div class="mermaid">
+flowchart LR
+  S1["① agent01.py をコピーして<br/>agent04.py を作る<br/><i>NAME / CARD / INSTRUCTIONS /<br/>出力スキーマ / ツール を書き換え</i>"]
+  S2["② core.py のレジストリに追加<br/>AGENT_MODULES に 1 行"]
+
+  S1 --> S2
+  S2 --> R1["orchestrator の委譲先"]
+  S2 --> R2["ORCHESTRATOR_INSTRUCTIONS の<br/>エージェント一覧"]
+  S2 --> R3["POST /api/agents/agent04"]
+  S2 --> R4["python core.py --agent agent04"]
+  S2 --> R5["WebUI のタブ"]
+
+  S3["③ tests/test_agent04.py を<br/>コピーして作る"]
+  S2 -.-> S3
+
+  classDef s fill:#f6fbfc,stroke:#0e8f9e,color:#10262e
+  classDef r fill:#f0faf6,stroke:#2ec4a0,color:#10262e
+  class S1,S2,S3 s
+  class R1,R2,R3,R4,R5 r
+      </div>
+    </div>
+    <figcaption><b>図4-11</b>　右側の5つは<b>全部自動で追従する</b>。
+    <code>SUBAGENTS</code> がレジストリから生成され、<code>SubAgents</code> がプロンプトに一覧を差し込み、WebUI は <code>/api/agents</code> を読むため。</figcaption>
+  </figure>
+
+  <div class="note warn">
+    <span class="lbl">自動追従の裏返し</span>
+    <p><strong><code>run()</code> を <code>track_run</code> で包み、<code>record.set_output()</code> を呼ぶこと。</strong>
+    これを忘れると、動くけれど<mark>WebUI の「エージェント実行」に何も出ない</mark>エージェントができる。
+    症状が「壊れている」ではなく「見えない」なので、原因に気づくのに時間がかかる。</p>
+  </div>
+
+  <div class="twocol">
+    <div class="card tint">
+      <span class="k">改修の1サイクル（既存エージェント）</span>
+      <h4><code>agentXX.py</code> だけを編集する</h4>
+      <pre style="margin:8px 0 0;font-size:11.5px"><code>vim agent02.py                    <span class="c-cm"># プロンプト / ツールを修正</span>
+python agent02.py <span class="c-st">"テスト入力"</span>      <span class="c-cm"># 単体で動作確認（最速）</span>
+pytest tests/test_agent02.py -v   <span class="c-cm"># 回帰していないか</span>
+python core.py --pipeline <span class="c-st">"…"</span>      <span class="c-cm"># 前段の出力を渡して確認</span></code></pre>
+      <p style="margin-top:12px"><strong>この4行が1サイクル。</strong>他のファイルを触らずに回せる。</p>
+    </div>
+    <div class="card tint">
+      <span class="k">切り分けの手順</span>
+      <h4>疑う範囲を1段ずつ広げる</h4>
+      <pre style="margin:8px 0 0;font-size:11.5px"><code>python agent02.py <span class="c-st">"…"</span>              <span class="c-cm"># ① 単体で正しいか</span>
+python core.py --agent agent02 <span class="c-st">"…"</span> <span class="c-cm"># ② レジストリ経由でも同じか</span>
+python core.py --pipeline <span class="c-st">"…"</span>      <span class="c-cm"># ③ 前段の出力を渡しても同じか</span>
+python core.py <span class="c-st">"…"</span>                 <span class="c-cm"># ④ 委譲でも同じか</span></code></pre>
+      <p style="margin-top:12px"><strong>①→④ で範囲が広がる。</strong>
+      どこで挙動が変わったかが、そのまま原因の場所。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 11. 議論 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">11</span>「なぜこの設計なのか」を議論する</h2>
+  <p class="sec-lede">
+    ここからは解説ではなく、<strong>3人で議論しながら読む</strong>パート。
+    どれもトレードオフのある判断で、<mark>正解は用途によって変わる</mark>。
+    自分の答えを出してから開くこと。
+  </p>
+
+  <div id="qa"></div>
+
+  <div class="note key">
+    <span class="lbl">この議論の行き先</span>
+    <p>ここで出た「自分ならこうする」は<strong>すぐには実装しない</strong>。
+    まず一度動かして、実際にどう失敗するかを見てからにする。<br>
+    <mark>座学で予想した弱点が、実際にどの失敗として現れたか（あるいは現れなかったか）</mark>は、
+    成果報告書の考察章の良い材料になる — 予想が外れていた場合も含めて。</p>
+  </div>
+</section>
+
+<!-- ============ 12. 読解手順 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">12</span>当日の読解手順</h2>
+  <p class="sec-lede">35分で 4,200 行は読めない。<strong>この順で、この問いを持って読む。</strong></p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:7%">順</th><th style="width:30%">やること</th><th style="width:10%">目安</th><th>持っていく問い</th></tr></thead>
+      <tbody>
+        <tr><td><strong>1</strong></td><td><span class="pathchip">README_ja.md</span> の「全体構成」と「責務の分け方」</td><td>4分</td>
+            <td>どのファイルに何を置く／置かないか。<strong>この表がそのまま改修時のルールになる</strong></td></tr>
+        <tr><td><strong>2</strong></td><td><span class="pathchip">config.py</span> の <code>AgentModule</code> と <code>AppDeps</code></td><td>6分</td>
+            <td><code>core.py</code> が各 <code>agentXX.py</code> を呼ぶために、どの名前と関数を見ているか。<strong>→ 崩してはいけない入口が分かる</strong></td></tr>
+        <tr><td><strong>3</strong></td><td><span class="pathchip">core.py</span> の <code>run_pipeline()</code></td><td>5分</td>
+            <td>前段の出力がどう次のプロンプトに入るか。<strong>いちばん短くて分かりやすい実装</strong></td></tr>
+        <tr><td><strong>4</strong></td><td><span class="pathchip">core.py</span> の <code>SUBAGENTS</code> と <code>run_orchestrator()</code></td><td>7分</td>
+            <td>委譲の4つのつまみ。<code>used_agents</code> をどこから埋めているか</td></tr>
+        <tr><td><strong>5</strong></td><td><strong>自分の担当エージェント</strong>を精読</td><td>8分</td>
+            <td><code>INSTRUCTIONS</code> / 出力スキーマ / ツール / <code>output_validator</code>。<strong>→ 改修範囲が確定する</strong></td></tr>
+        <tr><td><strong>6</strong></td><td><span class="pathchip">config.py</span> の <code>track_run</code> / <code>record</code></td><td>5分</td>
+            <td>失敗したとき、どこを見れば原因が分かるか</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="twocol">
+    <div class="card tint">
+      <span class="k">やらないこと</span>
+      <h4>全ファイルを読む</h4>
+      <p><code>history.py</code>・<code>static/main.js</code>・<code>_harness.py</code> は<strong>後回し</strong>。
+      必要になってから読めばよい。<mark>読まなかった場所は、問題が起きてから読む。</mark></p>
+    </div>
+    <div class="card tint">
+      <span class="k">やらないこと</span>
+      <h4>この場で改修を始める</h4>
+      <p>まだ一度も動かしていない。<strong>動かす前の改善は、効いたかどうか分からない改善</strong>になる。
+      気づいた点はメモに書き留めるだけにする。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ まとめ ============ -->
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>コマ1の締め</h2>
+  <p>座学が終わったら、4本の要点を突き合わせて<strong>コマ2で最初にどこへ手をつけるかを3人で決める</strong>。読解メモに書き留めた改善の候補が、そのまま着手順の候補になる。</p>
+
+  <div class="grid g3">
+    <div class="card tint2">
+      <h4>決めること 1 — 何を作るか</h4>
+      <p>このテンプレートは<strong>汎用の3体構成</strong>（リサーチ／分析／レポート）。
+      <a href="index.html">ゴール</a>に向けて、どの責務のエージェントが必要かを洗い出す。</p>
+    </div>
+    <div class="card tint2">
+      <h4>決めること 2 — 誰が何を持つか</h4>
+      <p><strong>1ファイル＝1エージェント＝1担当</strong>にすると、3人が同時に触ってもコンフリクトしない。
+      <code>core.py</code> と <code>config.py</code> は共同管轄。</p>
+    </div>
+    <div class="card tint2">
+      <h4>決めること 3 — 何から手をつけるか</h4>
+      <p>読解メモの改善候補に順番をつける。<strong>まず動かしてみて、実際の失敗と噛み合うものから。</strong></p>
+    </div>
+  </div>
+
+  <div class="note key" style="margin-top:24px">
+    <span class="lbl">4本の座学が、このコードのどこに現れていたか</span>
+    <div class="tbl-wrap" style="margin:12px 0 0">
+      <table>
+        <thead><tr><th style="width:22%">座学</th><th>実装での現れ方</th></tr></thead>
+        <tbody>
+          <tr><td><a href="lecture-01.html">① 証拠と再現性</a></td>
+              <td><code>output_validator</code> による URL 捏造の拒否／<code>used_agents</code> を実行記録から埋める／失敗も履歴に残す</td></tr>
+          <tr><td><a href="lecture-02.html">② ループとツール</a></td>
+              <td><code>Agent</code> ＋ <code>@agent.tool</code> ＋ <code>ModelRetry</code>／<code>deps_type</code> と <code>output_type</code>／生出力はファイル、要点だけを返す</td></tr>
+          <tr><td><a href="lecture-03.html">③ 分割と予算</a></td>
+              <td><code>SubAgents</code> の <code>max_calls</code> / <code>usage_limits</code> / <code>timeout_seconds</code>／<code>forward_usage</code> でツリー全体の合計</td></tr>
+          <tr><td><strong>④ 読解</strong></td>
+              <td><strong>上の3つが、実際にどの行なのかを指せるようになった</strong>状態がゴール</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <div class="pager">
+    <a href="lecture-03.html"><span class="dir">PREV</span><span class="nm">← 座学③ マルチエージェント設計論</span></a>
+    <a class="next" href="appendix-commands.html"><span class="dir">NEXT</span><span class="nm">おまけ よく使うコマンド →</span></a>
+  </div>
+  <footer class="foot">
+    <span>Z4 ／ コマ1 座学④ テンプレート実装のアーキテクチャ読解</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif',
+    themeVariables: {
+      primaryColor: '#f6fbfc', primaryTextColor: '#10262e', primaryBorderColor: '#0e8f9e',
+      lineColor: '#6f8791', secondaryColor: '#fdf8f1', tertiaryColor: '#ffffff', fontSize: '13px'
+    },
+    flowchart: { curve: 'basis', padding: 14 },
+    sequence: { actorMargin: 44, boxMargin: 8, mirrorActors: false, useMaxWidth: true }
+  });
+  window.mermaid = mermaid;
+</script>
+
+<script src="assets/app.js"></script>
+<script>
+/* =======================================================
+   1. ファイル構成エクスプローラ
+   ======================================================= */
+(function () {
+  const svg = document.getElementById('fs-svg');
+  const det = document.getElementById('fs-detail');
+  const foot = document.getElementById('fs-foot');
+
+  const F = [
+    {
+      f: 'core.py', y: 20, h: 62, c: '#0e8f9e', lines: '649 行',
+      sub: 'オーケストレータ + Flask + CLI',
+      body: '<b>エージェントを繋ぐ唯一の場所。</b><br><br>' +
+        '<b style="color:#1d9b7c">置くもの</b>　<code>AGENT_MODULES</code>（レジストリ）、<code>orchestrator</code>、' +
+        '<code>run_pipeline()</code>、<code>run_single_agent()</code>、Flask の全エンドポイント、CLI。<br><br>' +
+        '<b style="color:#d24a33">置かないもの</b>　<mark>エージェント固有のプロンプトやツール</mark>。' +
+        'ここに書いてしまうと、そのエージェントを単独で開発できなくなる。<br><br>' +
+        '<b style="color:#b8801a">触るとき</b>　<b>3人共同の管轄。</b>委譲方針・順序・予算はここ。' +
+        '1人で変えると他2人の実行結果が変わる。'
+    },
+    {
+      f: 'config.py', y: 92, h: 62, c: '#14b8c4', lines: '651 行',
+      sub: '全エージェントの共有物',
+      body: '<b>「すべてのエージェントが共有するもの」だけを置く。</b><br><br>' +
+        '<b style="color:#1d9b7c">置くもの</b>　<code>Settings</code>、<code>build_model()</code>、<code>AppDeps</code>、' +
+        '<code>AgentOutput</code>、<code>AgentCard</code>、<code>AgentModule</code>、<code>track_run</code>、' +
+        '<code>Artifact</code>、<code>RecordingAgent</code>。<br><br>' +
+        '<b style="color:#d24a33">置かないもの</b>　<mark>個別エージェントの知識</mark>。' +
+        '<code>AGENT01_ENABLE_WEB_SEARCH</code> のような設定も <code>Settings</code> のフィールドにはせず、' +
+        '<code>agent_flag()</code> という汎用の口だけを提供している。<br><br>' +
+        '<b style="color:#b8801a">触るとき</b>　スキーマ変更は3人に波及する。<b>フィールド追加は安全、意味の変更は要合意。</b>'
+    },
+    {
+      f: 'agent01.py', y: 164, h: 54, c: '#2ec4a0', lines: '363 行',
+      sub: '偵察（攻撃面の列挙）',
+      body: '<b>1ファイルで完結する。</b><code>NAME</code> / <code>CARD</code> / <code>agent</code> / <code>run()</code> の4点セット。<br><br>' +
+        '<b>ツール例</b>　<code>port_scan</code>、<code>http_probe</code>、<code>service_lookup</code>。<br><br>' +
+        '<b>出力</b>　<code>AttackSurface</code> と <code>Finding[]</code>。<br><br>' +
+        '<b style="color:#b8801a">読みどころ</b>　<code>INSTRUCTIONS</code> に「攻撃ペイロードは送らない」「列挙の打ち切り理由を書く」と明記する。' +
+        '<mark>偵察の責務境界をプロンプトで固定する</mark>実例。'
+    },
+    {
+      f: 'agent02.py', y: 228, h: 54, c: '#f2b544', lines: '429 行',
+      sub: '侵入（候補の検証と足がかり取得）',
+      body: '<b>いちばん危険で、いちばん強力なエージェント。</b><br><br>' +
+        '<b>ツール例</b>　<code>fetch_poc</code>、<code>adapt_payload</code>、<code>run_exploit</code>。実行前に承認ゲートを通す。<br><br>' +
+        '<b>出力</b>　<code>Foothold</code> と検証済み <code>Finding[]</code>。<br><br>' +
+        '<b style="color:#d24a33">読みどころ</b>　<code>output_validator</code> が2つある。' +
+        '<code>Foothold.kind</code> の値域チェックと、<b>証拠のないシェル取得報告の拒否</b>。' +
+        '「取れた」と言うだけでは通らない設計（→ 7節）。'
+    },
+    {
+      f: 'agent03.py', y: 292, h: 54, c: '#f7936a', lines: '241 行',
+      sub: '権限昇格（内部偵察と root / admin 到達）',
+      body: '<b>取得済みの足がかりを使って、権限昇格だけに集中する。</b><br><br>' +
+        '<b>ツール例</b>　<code>run_on_shell</code>、<code>enumerate_privesc</code>、' +
+        '<code>verify_privilege</code>（<mark>id や root 限定ファイルで証拠を取る</mark>）。<br><br>' +
+        '<b style="color:#b8801a">読みどころ</b>　<code>Foothold</code> が空なら無理に進めず、<code>blocked_by</code> に理由を残す。' +
+        '成功 validator では <code>uid=0</code> などの証拠が実在するかを見る。'
+    },
+    {
+      f: 'history.py', y: 356, h: 46, c: '#6f8791', lines: '275 行',
+      sub: '実行履歴の永続化（SQLite）',
+      body: '<b>エージェントの知識も LLM 呼び出しも持たない。</b>保存と読み出しだけ。<br><br>' +
+        '<code>HistoryEntry</code> に <code>runs</code> / <code>trace</code> / <code>artifacts</code> / ' +
+        '<code>messages</code> / <code>usage</code> を丸ごと入れて SQLite に書く。<br><br>' +
+        '<b style="color:#b8801a">読みどころ</b>　<code>latest_messages()</code>。' +
+        '<mark>会話継続（<code>continue: true</code>）はここから <code>message_history</code> を復元している</mark> — ' +
+        '<a href="lecture-02.html">座学②</a>で見た「毎回全部渡し直す」の実装。<br><br>' +
+        '<b>後回しでよい。</b>読解の優先度は低い。'
+    }
+  ];
+
+  let cur = 0;
+  function draw() {
+    let s = '';
+    F.forEach((x, i) => {
+      const on = i === cur;
+      s += '<g class="filebox" data-i="' + i + '">' +
+        '<rect x="20" y="' + x.y + '" width="380" height="' + x.h + '" rx="3" fill="' + (on ? x.c + '18' : '#fff') +
+        '" stroke="' + x.c + '" stroke-width="' + (on ? 2.2 : 1.3) + '"/>' +
+        '<rect x="20" y="' + x.y + '" width="4" height="' + x.h + '" fill="' + x.c + '"/>' +
+        '<text x="38" y="' + (x.y + 24) + '" class="svg-mono" font-size="12.5" font-weight="700" fill="#10262e">' + x.f + '</text>' +
+        '<text x="382" y="' + (x.y + 24) + '" text-anchor="end" class="svg-mono" font-size="9" fill="#9fb2ba">' + x.lines + '</text>' +
+        '<text x="38" y="' + (x.y + 42) + '" class="svg-sub" font-size="10">' + x.sub + '</text>' +
+        '</g>';
+    });
+    s += '<path d="M14,191 L14,123" stroke="#cddde2" stroke-width="1.2" fill="none"/>' +
+      '<path d="M14,255 L14,123" stroke="#cddde2" stroke-width="1.2" fill="none"/>' +
+      '<path d="M14,319 L14,123" stroke="#cddde2" stroke-width="1.2" fill="none"/>' +
+      '<path d="M10,128 L14,120 L18,128" fill="none" stroke="#cddde2" stroke-width="1.2"/>';
+    svg.innerHTML = s;
+    svg.querySelectorAll('.filebox').forEach((g) => {
+      g.addEventListener('click', () => { cur = +g.dataset.i; draw(); });
+    });
+    det.innerHTML = '<div style="font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:' + F[cur].c +
+      ';font-weight:700;margin-bottom:10px">' + F[cur].f + '</div>' + F[cur].body;
+    foot.innerHTML = '左端の細い線＝<b>agent01/02/03 が config.py にだけ依存している</b>ことを表す。' +
+      'この向きが一方通行である限り、エージェントは1体ずつ独立して開発できる。';
+  }
+  draw();
+})();
+
+/* =======================================================
+   3. 委譲 vs 決め打ち
+   ======================================================= */
+(function () {
+  const QUERY = '10.10.10.5 を偵察し、侵入できるか検証して root 取得まで試して';
+
+  const MODES = [
+    {
+      name: '委譲（/api/chat → run_orchestrator）',
+      steps: [
+        { who: 'orchestrator', depth: 0, label: 'orchestrator.run(query)',
+          prompt: '<span class="mut"># instructions（ORCHESTRATOR_INSTRUCTIONS）</span>\nあなたは専門エージェントを指揮するオーケストレータです。\n使えるサブエージェントの一覧と説明は delegate_task ツールの\n定義に含まれています。\n…\n<span class="mut">＋ SubAgents がここに一覧を差し込む</span>\n<span class="hl">  agent01 偵察: ポート・サービス・脆弱性候補を列挙…\n  agent02 侵入: 候補を検証し足がかりを取得…\n  agent03 権限昇格: Foothold から root / admin を狙う…</span>\n\n<span class="mut"># user</span>\n' + QUERY,
+          note: 'LLM は<b>まだ何も呼んでいない</b>。委譲ツールの定義とサブエージェントの説明を読んで、これから誰を呼ぶか決める。' },
+        { who: 'agent01', depth: 1, label: 'delegate_task(agent_name="agent01", task=…)',
+          prompt: '<span class="hl">10.10.10.5 の攻撃面を列挙してください。\nポート、サービス、HTTP パス、脆弱性候補を evidence 付きで返してください。\n攻撃ペイロードは送らないでください。</span>\n\n<span class="mut">※ LLM が書いた task がそのまま渡る。\n   親の会話は見えないので、自己完結していないと\n   agent01 は文脈を失う。</span>',
+          note: '<b>ここが委譲方式の弱点。</b>プロンプトに「サブエージェントは親の会話を見られない。そのエージェントだけで理解できる自己完結した指示を書くこと」と明記されているのは、<mark>LLM が省略しがちだから</mark>。' },
+        { who: 'agent02', depth: 1, label: 'delegate_task(agent_name="agent02", task=…)',
+          prompt: '<span class="hl">以下の偵察結果をもとに、侵入候補を検証してください。\n\n- 22/tcp OpenSSH 7.6p1\n- 8080/tcp Apache Tomcat 9.0.30\n- /manager/html は 401\n…</span>\n\n<span class="mut">※ agent01 の findings を、LLM が\n   要約して埋め込んでいる（＝情報が減る）</span>',
+          note: '<b>伝言ゲームが発生する箇所。</b>agent01 の出力は型付きだったのに、ここでは<mark>LLM が要約した自然文</mark>になっている。ポート番号や証拠が落ちることがある。' },
+        { who: 'agent03', depth: 1, label: 'delegate_task(agent_name="agent03", task=…)',
+          prompt: '<span class="hl">取得済みの Foothold を使って内部偵察し、権限昇格を試してください。\n成功した場合は id と root 限定ファイルの証拠を残してください。\n…</span>',
+          note: '3体目。<code>max_calls=2</code> なので、<b>同じ相手を3回目には呼べない</b>。' },
+        { who: 'orchestrator', depth: 0, label: 'OrchestratorOutput を返す',
+          prompt: '<span class="mut">output = OrchestratorOutput(</span>\n  summary=<span class="hl">"…"</span>,\n  answer=<span class="hl">"## 結論\\n…"</span>,\n  used_agents=[],   <span class="mut"># ← LLM は空でよい</span>\n<span class="mut">)</span>\n\n<span class="mut"># core.py が実行記録から上書きする</span>\noutput.used_agents = [run.agent <span class="hl">for</span> run <span class="hl">in</span> deps.runs\n                     <span class="hl">if</span> run.agent <span class="hl">in</span> AGENT_MODULES]',
+          note: '<b>used_agents は自己申告ではない。</b>実際の <code>deps.runs</code> から機械的に埋める。申告漏れも水増しも起きない。' }
+      ],
+      foot: '<b>呼ぶ相手と回数、渡す内容の全部を LLM が決めた。</b>柔軟だが、' +
+        '<mark>同じ依頼でも次は違う実行になる</mark>。評価しづらいのはこのため。'
+    },
+    {
+      name: '決め打ち（/api/pipeline → run_pipeline）',
+      steps: [
+        { who: 'pipeline', depth: 0, label: 'track_run(deps, "pipeline", query)',
+          prompt: '<span class="mut"># LLM は登場しない。コードが順序を決める。</span>\nrecon    = <span class="hl">await</span> agent01.run(query, deps, usage=usage, …)\nfoothold = <span class="hl">await</span> agent02.run(exploit_prompt, deps, usage=usage, …)\nprivesc  = <span class="hl">await</span> agent03.run(privesc_prompt, deps, usage=usage, …)',
+          note: '<b>この段には LLM 呼び出しが無い。</b>順序を決めるのに推論を使っていないので、要求数がそのぶん少ない。' },
+        { who: 'agent01', depth: 1, label: 'agent01.run(query)',
+          prompt: '<span class="hl">' + QUERY + '</span>\n\n<span class="mut">※ ユーザーの依頼がそのまま渡る。\n   加工も要約もされない。</span>',
+          note: '委譲方式と違い、<b>LLM が指示を書き直す余地がない</b>。良くも悪くも、依頼文の質がそのまま効く。' },
+        { who: 'agent02', depth: 1, label: 'agent02.run(exploit_prompt)',
+          prompt: '# 依頼\n' + QUERY + '\n\n# 偵察結果 (agent01)\n<span class="hl">{\n  "services": [\n    {"port": 22, "product": "OpenSSH", "version": "7.6p1"},\n    {"port": 8080, "product": "Apache Tomcat", "version": "9.0.30"}\n  ],\n  "findings": [\n    {"title": "Tomcat manager exists", "endpoint": "/manager/html", "evidence": "HTTP 401"}\n  ]\n}</span>\n\n上記の候補から、承認ゲートを通して侵入可否を検証してください。',
+          note: '<b>ここが決め打ちの強み。</b><code>recon.model_dump_json(indent=2)</code> で<mark>型付き出力を丸ごと</mark>埋め込む。要約されないので情報が落ちない。' },
+        { who: 'agent03', depth: 1, label: 'agent03.run(privesc_prompt)',
+          prompt: '# 依頼\n' + QUERY + '\n\n# 偵察結果 (agent01)\n<span class="hl">{…services / findings…}</span>\n\n# 侵入結果 (agent02)\n<span class="hl">{ "kind": "web_shell", "user": "tomcat", "evidence": ["id: uid=997(tomcat)"] }</span>\n\n取得済みの足がかりを使って権限昇格を試してください。',
+          note: '<b>2段ぶんの JSON が積まれる。</b>情報は落ちないが、<mark>プロンプトは確実に長くなる</mark>。' +
+                '<a href="lecture-02.html">座学②</a>のコンテキスト戦略のトレードオフがここに出ている。' },
+        { who: 'pipeline', depth: 0, label: 'PipelineOutput を返す',
+          prompt: '<span class="mut">output = PipelineOutput(</span>\n  query=query,\n  recon=<span class="hl">AttackSurface(…)</span>,      <span class="mut"># 型付きのまま</span>\n  foothold=<span class="hl">Foothold(…)</span>,\n  privesc=<span class="hl">PrivEscResult(…)</span>,\n<span class="mut">)</span>',
+          note: '<b>各段の生の出力が全部そのまま残る。</b>段ごとに評価できるので、<mark>どの段で品質が落ちたかを特定しやすい</mark>。委譲方式では最終回答しか残らない。' }
+      ],
+      foot: '<b>順序が固定なので毎回同じ形の実行になる。</b>' +
+        '<mark>再現性があり、段ごとに型付きの中間結果が手に入る</mark> — 評価に向く。'
+    }
+  ];
+
+  const COLORS = { orchestrator: '#0e8f9e', pipeline: '#0e8f9e', agent01: '#2ec4a0', agent02: '#f2b544', agent03: '#f7936a' };
+
+  const tree = document.getElementById('md-tree');
+  const promptEl = document.getElementById('md-prompt');
+  const foot = document.getElementById('md-foot');
+  const cEl = document.getElementById('md-c');
+  let mode = 0, i = -1;
+
+  function render() {
+    const M = MODES[mode];
+    tree.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:12px;color:var(--ink-2)">' + M.name + '</div>' +
+      M.steps.map((s, k) => {
+        const on = k <= i;
+        const isCur = k === i;
+        return '<div class="callrow' + (on ? ' on' : '') + '" style="padding-left:' + (s.depth * 22) + 'px">' +
+          '<span style="color:' + COLORS[s.who] + ';font-weight:700">' + (s.depth ? '└ ' : '') + s.who + '</span><br>' +
+          '<span style="padding-left:' + (s.depth ? 14 : 0) + 'px;color:' + (isCur ? 'var(--ink)' : 'var(--ink-3)') +
+          ';font-weight:' + (isCur ? '700' : '400') + '">' + s.label + '</span></div>';
+      }).join('');
+
+    cEl.textContent = (i + 1) + ' / ' + M.steps.length;
+    if (i < 0) {
+      promptEl.innerHTML = '（「次へ」を押してください）';
+      foot.innerHTML = '同じ依頼「<b>' + QUERY + '</b>」を、2つのモードで流して比べる。' +
+        '<b>右側に、そのエージェントが実際に受け取るプロンプトが出る。</b>';
+      return;
+    }
+    promptEl.innerHTML = M.steps[i].prompt;
+    foot.innerHTML = i === M.steps.length - 1 ? M.foot : M.steps[i].note;
+  }
+
+  Z4.seg(document.getElementById('md-seg'), (v) => { mode = +v; i = -1; render(); });
+  document.getElementById('md-next').addEventListener('click', () => {
+    i = (i + 1) % MODES[mode].steps.length; render();
+  });
+  document.getElementById('md-reset').addEventListener('click', () => { i = -1; render(); });
+  render();
+})();
+
+/* =======================================================
+   4. delegate_task 一往復
+   ======================================================= */
+(function () {
+  const svg = document.getElementById('dg-svg');
+  const det = document.getElementById('dg-detail');
+  const foot = document.getElementById('dg-foot');
+  const cEl = document.getElementById('dg-c');
+
+  const lanes = [
+    { id: 'llm',  n: 'LLM',            x: 58,  c: '#f2b544' },
+    { id: 'orch', n: 'orchestrator',   x: 168, c: '#0e8f9e' },
+    { id: 'sub',  n: 'SubAgents',      x: 272, c: '#14b8c4' },
+    { id: 'rec',  n: 'RecordingAgent', x: 352, c: '#2ec4a0' }
+  ];
+
+  const steps = [
+    { from: 'orch', to: 'llm', y: 82, lbl: 'プロンプト＋ツール定義',
+      t: 'ツール定義を送る',
+      d: '<code>SubAgents</code> capability が <code>delegate_task(agent_name, task)</code> を<b>1つだけ</b>生成し、' +
+         'サブエージェントの<b>一覧と説明を instructions に差し込む</b>。<br><br>' +
+         '説明文は <code>CARD.title</code> ＋ <code>CARD.description</code> から作られる。' +
+         '<mark>CARD の description が悪いと、委譲先の選択を間違える。</mark>' },
+    { from: 'llm', to: 'orch', y: 116, lbl: 'delegate_task(agent01, task)',
+      t: 'LLM が委譲を要求する',
+      d: '<b>LLM はまだ何も実行していない。</b>「agent01 にこの task を渡してほしい」という構造化データを返しただけ' +
+         '（<a href="lecture-02.html">座学②</a>の function calling そのまま）。<br><br>' +
+         '<code>agent_name</code> が不正なら、この時点で弾かれてモデルに差し戻る。' },
+    { from: 'orch', to: 'sub', y: 150, lbl: 'ツールとして実行',
+      t: 'SubAgents が受け取る',
+      d: 'ここで宣言済みの4つのつまみが効く。<br><br>' +
+         '<b>① <code>max_calls=2</code></b> を超えていたら実行せずに拒否 → <mark>ループがここで止まる</mark><br>' +
+         '<b>② <code>usage_limits</code></b> をこの委譲に適用<br>' +
+         '<b>③ <code>timeout_seconds</code></b> のタイマーを開始<br>' +
+         '<b>④ <code>forward_usage=True</code></b> なので親の <code>usage</code> を引き継ぐ' },
+    { from: 'sub', to: 'rec', y: 184, lbl: 'RecordingAgent.run(task)',
+      t: 'ラッパーを通る',
+      d: '<b>ここが RecordingAgent の存在理由。</b><code>SubAgents</code> は <code>Agent.run()</code> を直接呼ぶので、' +
+         '<mark><code>agent01.run()</code>（<code>track_run</code> で包んだ関数）は通らない</mark>。<br><br>' +
+         'ラッパーが <code>track_run</code> を張り直すことで、委譲方式でも <code>deps.runs</code> に入出力が残る。' },
+    { from: 'rec', to: 'rec', y: 218, lbl: 'agent01.agent.run(task)',
+      t: 'サブエージェントが動く',
+      d: '<b>ここから中で <a href="lecture-02.html">座学②</a>のループが回る。</b>' +
+         'agent01 は自分のツール（<code>search_knowledge_base</code> / <code>web_search</code> / <code>web_fetch</code>）を必要な回数呼ぶ。<br><br>' +
+         '<b>親からは中が見えない。</b><code>deps.record()</code> が呼ばれていないツールは、後から追えない。' },
+    { from: 'rec', to: 'sub', y: 252, lbl: 'Agent01Output',
+      t: '型付きの出力が返る',
+      d: '<b>返るのは <code>Agent01Output</code> だけ。</b>agent01 が読んだ Web ページの本文（数千文字）は' +
+         '<mark>ここで捨てられる</mark> — <a href="lecture-03.html">座学③</a>で見た「コンテキストの使い捨て」の実物。<br><br>' +
+         '同時に <code>RecordingAgent</code> が <code>record.set_output()</code> で入出力を記録する。' },
+    { from: 'sub', to: 'orch', y: 286, lbl: 'tool_result',
+      t: 'ツールの戻り値になる',
+      d: '<code>delegate_task</code> の戻り値として、<code>Agent01Output</code> がオーケストレータの<b>メッセージ列に追加される</b>。<br><br>' +
+         '<mark>親のコンテキストに積まれるのは、この型の中身だけ。</mark>' },
+    { from: 'orch', to: 'llm', y: 320, lbl: '全メッセージを再送',
+      t: '次の判断へ',
+      d: '<a href="lecture-02.html">座学②</a>のとおり、<b>これまでの全メッセージをもう一度送る</b>。' +
+         'LLM はこれを見て、次に誰を呼ぶか／もう十分かを判断する。<br><br>' +
+         '<b>これで1往復。</b>この図が委譲の回数だけ繰り返される。' +
+         '<mark>細かく切るほどこの往復が増え、要求数が増える</mark> — <a href="lecture-03.html">座学③</a>の粒度のトレードオフ。' }
+  ];
+
+  let i = -1, timer = null;
+
+  function draw() {
+    let s = '<defs><marker id="dah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">' +
+      '<path d="M0,0 L8,4 L0,8 z" fill="#0e8f9e"/></marker></defs>';
+    const pos = {}; lanes.forEach((l) => { pos[l.id] = l; });
+
+    lanes.forEach((l) => {
+      s += '<rect x="' + (l.x - 44) + '" y="14" width="88" height="34" rx="3" fill="#fff" stroke="' + l.c + '" stroke-width="1.4"/>' +
+        '<text x="' + l.x + '" y="35" text-anchor="middle" class="svg-label" font-size="' + (l.n.length > 10 ? '8' : '10') +
+        '" font-weight="700">' + l.n + '</text>' +
+        '<line x1="' + l.x + '" y1="50" x2="' + l.x + '" y2="342" stroke="#e2ecef" stroke-width="1.2" stroke-dasharray="3 3"/>';
+    });
+
+    steps.forEach((st, k) => {
+      const on = k <= i, isCur = k === i;
+      const a = pos[st.from], b = pos[st.to];
+      const col = on ? (isCur ? '#0e8f9e' : '#cddde2') : 'transparent';
+      if (st.from === st.to) {
+        s += '<path d="M' + a.x + ',' + st.y + ' C' + (a.x + 28) + ',' + st.y + ' ' + (a.x + 28) + ',' + (st.y + 12) +
+          ' ' + a.x + ',' + (st.y + 12) + '" fill="none" stroke="' + col + '" stroke-width="' + (isCur ? 2.2 : 1.4) +
+          '" marker-end="url(#dah)"/>';
+      } else {
+        const dir = b.x > a.x ? 1 : -1;
+        s += '<line x1="' + (a.x + dir * 3) + '" y1="' + st.y + '" x2="' + (b.x - dir * 6) + '" y2="' + st.y +
+          '" stroke="' + col + '" stroke-width="' + (isCur ? 2.2 : 1.4) + '" marker-end="url(#dah)"/>';
+      }
+      if (on) {
+        const tx = st.from === st.to ? a.x + 42 : (a.x + b.x) / 2;
+        s += '<text x="' + tx + '" y="' + (st.y - 6) + '" text-anchor="middle" class="svg-sub" font-size="8" fill="' +
+          (isCur ? '#10262e' : '#9fb2ba') + '">' + st.lbl + '</text>';
+      }
+    });
+
+    svg.innerHTML = s;
+    cEl.textContent = (i + 1) + ' / ' + steps.length;
+
+    if (i < 0) {
+      det.innerHTML = '<div style="color:var(--ink-3);font-size:13.5px;line-height:1.9">' +
+        '「再生」を押すと、<code>delegate_task</code> が1回呼ばれたときに何が起きるかを追える。<br><br>' +
+        '<b>4つのレーンのうち、自分が書くのは orchestrator の宣言だけ。</b>' +
+        '<code>SubAgents</code> と <code>RecordingAgent</code> は用意されている部品。</div>';
+      foot.innerHTML = '「1回の委譲」がコード上でどう展開されるかを追う。';
+      return;
+    }
+    det.innerHTML = '<div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--sea);font-weight:700;margin-bottom:8px">' +
+      'STEP ' + (i + 1) + '</div>' +
+      '<div style="font-size:15px;font-weight:700;margin-bottom:12px;line-height:1.55">' + steps[i].t + '</div>' +
+      '<div style="font-size:13.5px;line-height:1.85;color:var(--ink-2)">' + steps[i].d + '</div>';
+    foot.innerHTML = i === steps.length - 1
+      ? '<b>1往復＝LLM 要求2回（委譲の判断＋結果の解釈）＋サブエージェント内部のループ。</b>' +
+        'これが委譲のコストで、<code>USAGE_LIMIT_REQUESTS=15</code> の枠をどう配るかの話になる。'
+      : '「1回の委譲」がコード上でどう展開されるかを追う。';
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; document.getElementById('dg-play').textContent = '▶ 再生'; } }
+  document.getElementById('dg-next').addEventListener('click', () => { stop(); i = (i + 1) % steps.length; draw(); });
+  document.getElementById('dg-reset').addEventListener('click', () => { stop(); i = -1; draw(); });
+  document.getElementById('dg-play').addEventListener('click', function () {
+    if (timer) { stop(); return; }
+    this.textContent = '■ 停止';
+    if (i >= steps.length - 1) i = -1;
+    timer = setInterval(() => { if (i >= steps.length - 1) { stop(); return; } i++; draw(); }, 3400);
+  });
+  draw();
+})();
+
+/* =======================================================
+   6. trace と runs
+   ======================================================= */
+(function () {
+  const body = document.getElementById('lg-body');
+  const foot = document.getElementById('lg-foot');
+
+  const TRACE = [
+    { a: 'pipeline', m: 'start', d: 'chars=24' },
+    { a: 'agent01', m: 'start', d: 'chars=24' },
+    { a: 'agent01', m: 'port_scan', d: 'target="10.10.10.5" ports=1-1000' },
+    { a: 'agent01', m: 'http_probe', d: 'port=8080 status=401 chars=612' },
+    { a: 'agent01', m: 'done', d: 'duration_ms=1840.2' },
+    { a: 'agent02', m: 'start', d: 'chars=1206' },
+    { a: 'agent02', m: 'check_default_creds', d: 'service=tomcat ok=True' },
+    { a: 'agent02', m: 'deploy_webshell', d: 'ok=True evidence=1' },
+    { a: 'agent02', m: 'artifact', d: 'filename="foothold-id.txt" url="/api/artifacts/…"' },
+    { a: 'agent02', m: 'done', d: 'duration_ms=4210.8' },
+    { a: 'agent03', m: 'start', d: 'chars=2894' },
+    { a: 'agent03', m: 'verify_privilege', d: 'uid=0 evidence=2' },
+    { a: 'agent03', m: 'done', d: 'duration_ms=1602.4' },
+    { a: 'pipeline', m: 'done', d: 'duration_ms=7891.3' }
+  ];
+
+  const RUNS = [
+    { a: 'pipeline', ms: 7891.3, ev: 0,
+      inp: '10.10.10.5 を偵察し、侵入できるか検証して root 取得まで試して',
+      out: '{ "query": "…", "recon": {…}, "foothold": {…}, "privesc": {…} }' },
+    { a: 'agent01', ms: 1840.2, ev: 2,
+      inp: '10.10.10.5 を偵察し、侵入できるか検証して root 取得まで試して',
+      out: '{ "services": [ { "port": 22 }, { "port": 8080 } ],\n  "findings": [ { "endpoint": "/manager/html", "evidence": "HTTP 401" } ] }' },
+    { a: 'agent02', ms: 4210.8, ev: 3,
+      inp: '# 依頼\n10.10.10.5 を…\n\n# 偵察結果 (agent01)\n{ "findings": [ … ] }   ← ここに入っているかを確認する\n\n上記の候補から侵入可否を検証してください。',
+      out: '{ "kind": "web_shell", "user": "tomcat", "access_level": "service",\n  "evidence": [ { "url": "/api/artifacts/…/foothold-id.txt" } ] }' },
+    { a: 'agent03', ms: 1602.4, ev: 1,
+      inp: '# 依頼\n…\n\n# 偵察結果 (agent01)\n{…}\n\n# 侵入結果 (agent02)\n{…evidence…}   ← Foothold が渡っているか\n\n権限昇格を試してください。',
+      out: '{ "start_level": "service", "final_level": "root",\n  "evidence": [ "id: uid=0(root)", "/etc/shadow head" ], "blocked_by": [] }' }
+  ];
+
+  const COL = { pipeline: '#0e8f9e', agent01: '#2ec4a0', agent02: '#f2b544', agent03: '#f7936a' };
+
+  function renderTrace() {
+    body.innerHTML =
+      '<div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:12px">' +
+      'deps.trace — list[TraceStep] ／ ' + TRACE.length + ' 件</div>' +
+      '<div style="font-family:var(--mono);font-size:11.5px;line-height:1.95;overflow-x:auto">' +
+      TRACE.map((t) => {
+        const meta = t.m === 'start' || t.m === 'done';
+        return '<div style="padding:1px 0;white-space:nowrap">' +
+          '<span style="display:inline-block;width:88px;color:' + COL[t.a] + ';font-weight:700">' + t.a + '</span>' +
+          '<span style="display:inline-block;width:190px;color:' + (meta ? 'var(--ink-4)' : '#0a6f7c') +
+          ';font-weight:' + (meta ? '400' : '700') + '">' + t.m + '</span>' +
+          '<span style="color:var(--ink-4)">' + t.d + '</span></div>';
+      }).join('') + '</div>';
+    foot.innerHTML = '<b>流れは分かるが、中身は分からない。</b>' +
+      '「agent02 が呼ばれた」までは見えるが、<mark>agent02 が受け取ったプロンプトに agent01 の findings が入っていたか</mark>は分からない。' +
+      '→ そこで runs。';
+  }
+
+  function renderRuns() {
+    body.innerHTML =
+      '<div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:12px">' +
+      'deps.runs — list[AgentRunRecord] ／ ' + RUNS.length + ' 件</div>' +
+      RUNS.map((r) =>
+        '<div style="border:1px solid var(--line);border-left:3px solid ' + COL[r.a] +
+        ';border-radius:0 3px 3px 0;padding:12px 14px;margin-bottom:10px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;flex-wrap:wrap;gap:8px">' +
+        '<b style="font-family:var(--mono);font-size:12px;color:' + COL[r.a] + '">' + r.a + '</b>' +
+        '<span class="rng-lbl">events ' + r.ev + ' ／ ' + r.ms + ' ms</span></div>' +
+        '<div style="font-size:10.5px;font-family:var(--mono);color:var(--ink-3);margin-bottom:3px">input（プロンプト全文）</div>' +
+        '<div style="font-family:var(--mono);font-size:10.5px;line-height:1.7;background:#0f2730;color:#d5e6ea;padding:9px 11px;border-radius:2px;white-space:pre-wrap;margin-bottom:8px">' +
+        r.inp.replace(/</g, '&lt;') + '</div>' +
+        '<div style="font-size:10.5px;font-family:var(--mono);color:var(--ink-3);margin-bottom:3px">output</div>' +
+        '<div style="font-family:var(--mono);font-size:10.5px;line-height:1.7;background:var(--paper-2);border:1px solid var(--line);padding:9px 11px;border-radius:2px;white-space:pre-wrap">' +
+        r.out.replace(/</g, '&lt;') + '</div></div>'
+      ).join('');
+    foot.innerHTML = '<b>これが WebUI の「エージェント実行」ビュー。</b>' +
+      '<mark>agent02 の input に agent01 の findings が入っているかが一目で分かる</mark>。' +
+      'マルチエージェントの不具合はほぼ全て「どの段で入力が壊れたか」なので、ここが最も見る場所になる。';
+  }
+
+  Z4.seg(document.getElementById('lg-seg'), (v) => { (+v === 0 ? renderTrace : renderRuns)(); });
+  renderTrace();
+})();
+
+/* =======================================================
+   12. 議論カード
+   ======================================================= */
+(function () {
+  const QA = [
+    {
+      q: 'なぜ agentXX.py は互いに import しないのか。agent02 が agent01 を直接呼べば楽なのでは',
+      a: '楽だが、<b>そのエージェントを単独で動作確認できなくなる</b>。<br><br>' +
+         '<code>python agent02.py "…"</code> で単体実行できるのは、agent02 が agent01 に依存していないから。' +
+         '依存していたら agent01 も動かす必要があり、<mark>agent02 の不具合か agent01 の不具合かが切り分けられなくなる</mark>。<br><br>' +
+         '<b>3人で開発するときの効果が大きい。</b>担当が別ファイルなのでコンフリクトしないし、' +
+         '「自分の担当は単体で正しい」を独立に主張できる。<br><br>' +
+         '<b style="color:#d24a33">代償</b>：エージェント間のデータ受け渡しを <code>core.py</code> が全部書くことになる。' +
+         '<code>run_pipeline()</code> のプロンプト組み立てが手作業に見えるのはこのため。<b>これは意図的な冗長さ。</b>'
+    },
+    {
+      q: 'なぜ委譲（/api/chat）と決め打ち（/api/pipeline）の両方を用意しているのか',
+      a: '<b>目的が違う。</b><br><br>' +
+         '<b>決め打ち</b>は<mark>評価と改善のため</mark>。順序が固定なので毎回同じ形の実行になり、' +
+         '段ごとに型付きの中間結果が残る。「agent02 を直したら agent02 の出力がどう変わったか」を見られる。<br><br>' +
+         '<b>委譲</b>は<mark>実際の使い方のため</mark>。依頼が毎回違う現実に対応できる。<br><br>' +
+         '<b>実務的な使い分け</b>：改善のループは <code>--pipeline</code> で回し、' +
+         '仕上がったら委譲方式で確認する。<b>デバッグ中に委譲方式を使うと、実行内容が毎回変わって比較にならない。</b><br><br>' +
+         '<b>議論すべき点</b>：両方を保守するコストは安くない。片方に絞るなら、どちらを捨てるか。'
+    },
+    {
+      q: 'RecordingAgent は本当に必要か。SubAgents に agentXX.run() を渡せばよいのでは',
+      a: '<code>SubAgents</code> は <code>Agent</code> インスタンスを受け取る API なので、' +
+         '<b><code>run()</code> という関数を渡す口がない</b>。だから <code>Agent</code> の見た目を保ったまま' +
+         '<code>run()</code> だけ差し替える <code>WrapperAgent</code> を使っている。<br><br>' +
+         '<b>これはライブラリの制約から生まれた設計</b>で、綺麗ではない。' +
+         'ただし<mark>「記録が落ちる」という失敗は症状が出にくい</mark>（動くけれど WebUI に何も出ない）ので、' +
+         '仕掛けとしてでも入れておく価値はある。<br><br>' +
+         '<b>議論すべき点</b>：もし <code>SubAgents</code> を使わず委譲ツールを手書きしたら、' +
+         'このラッパーは不要になる。<b>宣言的な楽さと、仕組みの見通しの良さのどちらを取るか。</b>'
+    },
+    {
+      q: 'なぜ used_agents を LLM に書かせず、実行記録から埋めているのか',
+      a: '<b>LLM は自分がやったことを正確に報告しない。</b>' +
+         '呼んだのに書き忘れる（申告漏れ）、呼んでいないのに書く（水増し）が両方起きる。<br><br>' +
+         '<code>deps.runs</code> は<b>実際に実行された記録</b>なので、そこから作れば食い違いが原理的に起きない。<br><br>' +
+         '<mark>この考え方は「本当に到達したか」を判定する場面すべてに使える。</mark>' +
+         '主張を LLM に書かせるのではなく、<b>実行の副作用として残った記録から機械的に構成する</b>。' +
+         '<a href="lecture-01.html">座学①</a>の証拠の話と同じ構造。<br><br>' +
+         '<b>コスト</b>：記録が残らない経路があると成立しない。だから <code>track_run</code> の徹底が要る。'
+    },
+    {
+      q: 'output_validator で URL の捏造を弾いているが、これは過剰ではないか',
+      a: '<b>過剰ではない。</b>LLM は「それらしい URL」を平気で作る。' +
+         '<code>/api/artifacts/abc123/chart.png</code> のような形式を1度見せれば、' +
+         '<mark>存在しないファイル名で同じ形の URL を生成する</mark>。<br><br>' +
+         'そのままレポートに載ると、<b>画像が壊れたリンクになる</b> — しかも本文には「図1に示すとおり」と書かれている。' +
+         '人間が見れば気づくが、自動で回している間は気づかない。<br><br>' +
+         '<b>効き方</b>：<code>ModelRetry</code> なのでやり直しになり、<b>2回目は正しい URL を使う</b>ことが多い。' +
+         '禁止するだけでなく「run_python が返した charts の url をそのまま使え」と<mark>正しいやり方を指示に含めている</mark>のが要点。<br><br>' +
+         '<b>コスト</b>：やり直しのぶん要求数が増える。<code>retries</code> の上限に当たると実行が失敗する。'
+    },
+    {
+      q: 'このテンプレートを自分たちの目的に合わせるとき、まずどこを変えるか',
+      a: '<b>正解のある問いではない。</b>3人で意見を出して、着手順を決めるための問い。<br><br>' +
+         '<b>変えやすい順に並べると</b>：<br>' +
+         '① <code>INSTRUCTIONS</code>（プロンプト）— <mark>最も安く、最も効く</mark>。1ファイル内で完結<br>' +
+         '② ツールの追加／削除 — 1ファイル内。ただし<a href="lecture-03.html">座学③</a>のとおり数を増やしすぎない<br>' +
+         '③ 出力スキーマ — <code>core.py</code> の <code>PipelineOutput</code> に波及する<br>' +
+         '④ エージェントの構成そのもの（何体・何を担当）— <code>AGENT_MODULES</code> と担当分担の見直し<br><br>' +
+         '<b>講師の見立て</b>：<mark>③と④に手を出す前に、①で取れるところを取り切ったか</mark>を確認したほうがよい。' +
+         'プロンプトの改善は測りやすく、戻しやすく、コストが低い。<br><br>' +
+         '<b>ただし今この場で決めない。</b>一度動かして、実際にどこで失敗するかを見てから。'
+    }
+  ];
+
+  const root = document.getElementById('qa');
+  root.innerHTML = QA.map((x, i) =>
+    '<div class="qcard">' +
+    '<div class="q"><span class="chip sand" style="margin-right:8px">Q' + (i + 1) + '</span>' + x.q + '</div>' +
+    '<button data-i="' + i + '">議論してから開く</button>' +
+    '<div class="a" id="a' + i + '">' + x.a + '</div></div>'
+  ).join('');
+
+  root.querySelectorAll('button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const a = document.getElementById('a' + b.dataset.i);
+      const on = a.classList.toggle('on');
+      b.textContent = on ? '閉じる' : '議論してから開く';
+      b.style.borderColor = on ? 'var(--sand)' : '';
+      b.style.color = on ? '#b8801a' : '';
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

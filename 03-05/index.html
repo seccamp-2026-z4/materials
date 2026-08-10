@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コマ3-5 — 評価・レビュー・改良 ｜ Z4</title>
+<link rel="stylesheet" href="../01/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ3-5</b><span>ITERATION SPRINT</span></a>
+    <nav class="topnav">
+      <a href="../index.html">トップ</a>
+      <a href="../01/index.html">コマ1</a>
+      <a href="../02/index.html">コマ2</a>
+      <a href="index.html" class="is-current">コマ3-5</a>
+      <a href="../06/index.html">コマ6</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">コマ3-5 ／ 評価・レビュー・改良</p>
+  <h1>標的を変えながら<br>失敗をレビューして改良する</h1>
+  <p class="lede">
+    標的環境を変えながら失敗したところをレビューし、改良していく。
+    成功した場合は時間やトークン数が節約できるかどうかを検討する。
+  </p>
+  <p class="lede">
+    目的は「1台だけ攻略できるエージェント」ではなく、初見の標的でも同じ考え方で前進できるエージェントに近づけること。
+    コマ3〜5では、個別の進行を分けず、ひたすらテストと改良を繰り返す。
+  </p>
+</div>
+
+<section class="blk wrap rv">
+  <h2><span class="num">00</span>この3コマの進め方</h2>
+  <p class="sec-lede">
+    コマ3-5は、同じサイクルを標的を変えながら繰り返す時間。
+    コマごとに別の目的を置くのではなく、テストして、失敗を見て、直して、またテストする。
+    実行 → 記録 → 分類 → 改修 → 再実行の順で進める。
+  </p>
+
+  <div class="grid g5">
+    <div class="card tint"><span class="k">1</span><h4>標的を選ぶ</h4><p>前回と違う難易度・タグ・サービス構成の標的を選ぶ。</p></div>
+    <div class="card tint"><span class="k">2</span><h4>実行する</h4><p>同じ条件でエージェントを走らせ、ログと成果物を残す。</p></div>
+    <div class="card tint"><span class="k">3</span><h4>分類する</h4><p>どこで止まったかを、偵察・侵入・昇格・検証・予算のどれかに分類する。</p></div>
+    <div class="card tint"><span class="k">4</span><h4>改良する</h4><p>プロンプト、ツール、状態、評価条件のどこを直すか決める。</p></div>
+    <div class="card tint"><span class="k">5</span><h4>測り直す</h4><p>成功率、時間、LLM要求数、トークン数を変更前後で比較する。</p></div>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">01</span>失敗レビュー</h2>
+  <p class="sec-lede">
+    失敗は「うまくいかなかった」で終わらせない。
+    どの層で失敗したかを決めると、直す場所が見える。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:22%">分類</th><th>見るログ</th><th style="width:32%">主な改良先</th></tr></thead>
+      <tbody>
+        <tr><td>偵察漏れ</td><td>ポートスキャン、HTTP探索、サービス特定のログ</td><td>偵察ツール、打ち切り条件、サービス一覧の状態</td></tr>
+        <tr><td>脆弱性特定ミス</td><td>Finding の根拠、検索結果、バナー解釈</td><td>プロンプト、Finding のスキーマ、証拠の残し方</td></tr>
+        <tr><td>侵入失敗</td><td>PoC 実行ログ、エラー本文、承認ゲートの記録</td><td>ツール引数、エラー解釈、別ベクタへの切り替え</td></tr>
+        <tr><td>権限昇格失敗</td><td><code>Foothold</code>、内部偵察、<code>sudo -l</code>、SUID、cron</td><td><code>Foothold</code> の型、昇格ツール、内部状態</td></tr>
+        <tr><td>同じ試行の反復</td><td><code>tried</code>、ツール呼び出し履歴、進捗差分</td><td>ループ検知、予算配分、禁止リスト</td></tr>
+        <tr><td>成功判定の誤り</td><td>最終出力、証拠ファイル、<code>id</code> などの確認ログ</td><td>出力バリデータ、証拠要求、評価スクリプト</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">02</span>成功した場合に見ること</h2>
+  <p class="sec-lede">
+    成功した場合も、そこで終わりではない。
+    同じ成功をより短い時間・少ない LLM 要求数・少ないトークン数で達成できるかを見る。
+  </p>
+
+  <div class="grid g3">
+    <div class="card">
+      <span class="k">TIME</span>
+      <h4>時間</h4>
+      <p>スキャンや検索に時間を使いすぎていないか。成功までの所要時間を前回と比べる。</p>
+    </div>
+    <div class="card">
+      <span class="k">REQUESTS</span>
+      <h4>LLM要求数</h4>
+      <p>同じ判断を何度もモデルに聞いていないか。委譲の粒度が細かすぎないかを見る。</p>
+    </div>
+    <div class="card">
+      <span class="k">TOKENS</span>
+      <h4>トークン数</h4>
+      <p>生ログを履歴に入れすぎていないか。状態と artifacts の分離が効いているかを見る。</p>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">03</span>動作が安定してきたら</h2>
+  <p class="sec-lede">
+    ある程度、偵察 → 侵入 → 権限昇格の流れが動作するようになったら、コマ5あたりで WebUI とレポートの改良にも着手する。
+    ただし、偵察 → 侵入 → 権限昇格の一連の実行がまだ安定していない段階では後回しにする。
+  </p>
+
+  <div class="grid g2">
+    <div class="card">
+      <span class="k">WEBUI</span>
+      <h4>実行状況を見やすくする</h4>
+      <p>到達フェーズ、失敗分類、所要時間、LLM要求数、トークン数、証拠ファイルへのリンクを見やすくする。
+      レビューに必要な情報が1画面で追えることを優先する。</p>
+    </div>
+    <div class="card">
+      <span class="k">REPORT</span>
+      <h4>成果報告に使える形にする</h4>
+      <p>成功した標的だけでなく、止まった標的についても「どこで止まり、なぜか」を出せるようにする。
+      変更前後の比較、残課題、証拠の参照をレポートに含める。</p>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>成果物</h2>
+  <div class="grid g3">
+    <div class="card tint2"><h4>実行ログ</h4><p>標的、実行時刻、到達フェーズ、所要時間、LLM要求数、トークン数。</p></div>
+    <div class="card tint2"><h4>レビュー記録</h4><p>失敗分類、原因、改良方針、誰がどこを直すか。</p></div>
+    <div class="card tint2"><h4>比較結果</h4><p>変更前後で成功率、時間、トークン数がどう変わったか。</p></div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer class="foot">
+    <span>Z4 ／ コマ3-5 評価・レビュー・改良</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script src="../01/assets/app.js"></script>
+</body>
+</html>

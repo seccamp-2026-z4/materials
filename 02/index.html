@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コマ2 — テンプレートからプロトタイプを完成させる ｜ Z4</title>
+<link rel="stylesheet" href="../01/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+<style>
+.steps { border-top: 1px solid var(--line); }
+.step {
+  display: grid; grid-template-columns: 46px 1fr; gap: 0 18px;
+  border-bottom: 1px solid var(--line); padding: 20px 4px;
+}
+.step .box {
+  width: 26px; height: 26px; border: 1.5px solid var(--line-2); border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 12px; color: var(--sea); background: #fff;
+}
+.step h4 { margin: 0 0 8px; font-size: 15.5px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.step h4 .n { font-family: var(--mono); font-size: 11px; color: var(--sea); font-weight: 700; }
+.step .d { font-size: 13.5px; color: var(--ink-2); line-height: 1.85; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ2</b><span>PROTOTYPE SPRINT</span></a>
+    <nav class="topnav">
+      <a href="../index.html">トップ</a>
+      <a href="../01/index.html">コマ1</a>
+      <a href="index.html" class="is-current">コマ2</a>
+      <a href="../03-05/index.html">コマ3-5</a>
+      <a href="../06/index.html">コマ6</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">コマ2 ／ テンプレートから最初の1本を通す</p>
+  <h1>テンプレートから<br>プロトタイプを完成させる</h1>
+  <p class="lede">
+    このコマの目的は、完成度の高いエージェントを作ることではない。
+    <strong>テンプレートをペンテスト向けに差し替え、偵察 → 侵入 → 権限昇格の3つのサブエージェントが端から端まで連携する状態を作る</strong>こと。
+  </p>
+  <p class="lede">
+    ここで作るのは、3人が並行開発に入るための土台。
+    共通スキーマ、安全機構、パイプラインの順序、サブエージェント間の受け渡しを先に固める。
+    個別エージェントの作り込みは、ゲートAを通過してから始める。
+  </p>
+</div>
+
+<section class="blk wrap rv">
+  <h2><span class="num">00</span>このコマのゴール</h2>
+  <p class="sec-lede">
+    コマ2の完了条件は、<strong>「型が確定して、サブエージェントが端から端まで連携する」</strong>こと。
+    まだ賢くなくてよい。まだ root を取れなくてよい。3人が同じ前提で開発できる形にする。
+  </p>
+
+  <div class="grid g3">
+    <div class="card tint">
+      <span class="k">GOAL 1</span>
+      <h4>共通スキーマを確定する</h4>
+      <p><code>Target</code>、<code>Finding</code>、<code>Foothold</code>、<code>PrivEscResult</code> など、エージェント間で受け渡す型を決める。</p>
+    </div>
+    <div class="card tint">
+      <span class="k">GOAL 2</span>
+      <h4>サブエージェント3段を通す</h4>
+      <p><code>agent01</code>、<code>agent02</code>、<code>agent03</code> をペンテスト用の名前と出力型に差し替え、パイプラインで順に実行できるようにする。</p>
+    </div>
+    <div class="card tint">
+      <span class="k">GOAL 3</span>
+      <h4>並行開発に入れる状態にする</h4>
+      <p>共通ファイルをむやみに触らず、各自が自分の <code>agentXX.py</code>、テスト、評価だけを進められる状態にする。</p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">このコマでやらないこと</span>
+    <p>プロンプトの細かい調整、攻撃ツールの本格実装、権限昇格ロジックの作り込みは後回し。
+    先に個別開発へ走ると、共通スキーマの解釈違いで統合時に作り直しになる。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">01</span>最初に決めること — RoE と設計合意</h2>
+  <p class="sec-lede">
+    コードを書く前に、攻撃してよい範囲と、3人の分担境界を決める。
+    この合意は <code>docs/RULES_OF_ENGAGEMENT.md</code> と <code>docs/DESIGN_AGREEMENT.md</code> に書いて commit する。
+  </p>
+
+  <div class="grid g2">
+    <div class="card">
+      <span class="k">STEP 0</span>
+      <h4>交戦規則（RoE）</h4>
+      <p>対象スコープ、禁止操作、承認ゲート、レート制限、認可の証跡を明文化する。
+      検証環境は <strong>z4.shino.club</strong>。開発中はここ以外にリクエストを出さない。</p>
+    </div>
+    <div class="card">
+      <span class="k">STEP 1</span>
+      <h4>設計合意</h4>
+      <p>エージェント分割、共通データモデル、安全機構の置き場所、実行方式、テスト方針、ファイル所有権を決める。</p>
+    </div>
+  </div>
+
+  <h3>3人で合意する責務境界</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:18%">担当</th><th style="width:22%">エージェント</th><th>責務</th><th style="width:25%">主な出力</th></tr></thead>
+      <tbody>
+        <tr><td>A</td><td><code>agent01</code> 偵察</td><td>ポート、サービス、エンドポイント、技術スタック、脆弱性候補を集める。攻撃ペイロードは送らない。</td><td><code>AttackSurface</code><br><code>Finding[]</code></td></tr>
+        <tr><td>B</td><td><code>agent02</code> 侵入</td><td>候補を検証し、侵入の足がかりを得る。実行前に承認ゲートを通す。</td><td><code>Foothold</code><br>検証済み <code>Finding[]</code></td></tr>
+        <tr><td>C</td><td><code>agent03</code> 権限昇格</td><td><code>Foothold</code> を使って権限昇格を試み、到達権限と証拠を残す。</td><td><code>PrivEscResult</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">最重要の合意</span>
+    <p><code>Foothold</code> は agent02 から agent03 へ渡す「生きたアクセス」。
+    Cookie、Web シェル URL、SSH 接続情報、コマンド実行の口などをどう表現するかを先に決める。
+    ここが曖昧だと、agent03 は何もできない。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">02</span>共通基盤を先に作る</h2>
+  <p class="sec-lede">
+    触る中心は <code>config.py</code> と <code>core.py</code>。
+    ここは1人が実装し、残り2人がレビューする。複数人で同時に触ると衝突しやすい。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:24%">対象</th><th>やること</th><th style="width:25%">完了の目安</th></tr></thead>
+      <tbody>
+        <tr><td><code>config.py</code></td><td>共通型を追加する。<code>Target</code>、<code>Credential</code>、<code>Evidence</code>、<code>Finding</code>、<code>Foothold</code>、<code>PrivEscResult</code>。</td><td>3人がレビュー済み</td></tr>
+        <tr><td><code>config.py</code></td><td>スコープガード、監査ログ、承認ゲート、コマンド実行ラッパーを共通基盤に置く。</td><td>各エージェントが同じ口を使える</td></tr>
+        <tr><td><code>agent01.py</code> 〜 <code>agent03.py</code></td><td>名前、説明、出力型をペンテスト用に差し替える。まずは最小限のサブエージェントでよい。</td><td>単体で型どおりの JSON を返す</td></tr>
+        <tr><td><code>core.py</code></td><td><code>run_pipeline()</code> を偵察 → 侵入 → 権限昇格の順に配線する。</td><td>端から端まで実行できる</td></tr>
+        <tr><td><code>core.py</code></td><td><code>Foothold.kind == "none"</code> のとき agent03 をスキップする分岐を入れる。</td><td>侵入失敗ケースで止まらない</td></tr>
+        <tr><td><code>.env.example</code></td><td>スコープ、モデル名、承認ゲート、タイムアウトなどの設定キーを追加する。</td><td>初期設定が共有できる</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <span class="code-cap">共通型の核になる考え方</span>
+  <pre><code># config.py に置く型の例。実装前に3人で確定する。
+
+class Finding(AgentOutput):
+    id: str
+    title: str
+    severity: Literal["critical", "high", "medium", "low", "info"]
+    confidence: float
+    endpoint: str
+    evidence: list[Evidence] = []
+    verified: bool = False
+
+class Foothold(AgentOutput):
+    id: str
+    kind: Literal["web_session", "web_shell", "rce", "ssh", "db", "none"]
+    host: str
+    user: str = ""
+    access_level: Literal["none", "user", "service", "admin", "root"] = "none"
+    handle: str = ""
+    credentials: list[Credential] = []
+    evidence: list[Evidence] = []
+
+class PrivEscResult(AgentOutput):
+    start_level: str
+    final_level: str
+    path: list[str] = []
+    evidence: list[Evidence] = []
+    blocked_by: list[str] = []</code></pre>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">03</span>今日の作業手順</h2>
+  <p class="sec-lede">
+    時間内に目指すのはゲートA。個別の賢さではなく、共通基盤とパイプラインの疎通を優先する。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">コマ2の進め方</span>
+      <span class="ctl"><span class="chip sea">この順で進める</span></span>
+    </div>
+    <div class="demo-body">
+      <div class="steps">
+        <div class="step">
+          <div class="box">1</div>
+          <div><h4><span class="n">STEP 0</span>RoE を書く</h4><div class="d">スコープ、禁止操作、承認ゲートを <code>docs/RULES_OF_ENGAGEMENT.md</code> に書く。</div></div>
+        </div>
+        <div class="step">
+          <div class="box">2</div>
+          <div><h4><span class="n">STEP 1</span>設計合意を書く</h4><div class="d">責務境界、共通型、実行方式、テスト方針を <code>docs/DESIGN_AGREEMENT.md</code> に書く。</div></div>
+        </div>
+        <div class="step">
+          <div class="box">3</div>
+          <div><h4><span class="n">STEP 2</span>共通型を実装する</h4><div class="d"><code>config.py</code> に型と安全機構の入口を追加する。3人でレビューする。</div></div>
+        </div>
+        <div class="step">
+          <div class="box">4</div>
+          <div><h4><span class="n">STEP 3</span>サブエージェントを差し替える</h4><div class="d"><code>agent01</code>、<code>agent02</code>、<code>agent03</code> をペンテスト用の出力型で返すようにする。</div></div>
+        </div>
+        <div class="step">
+          <div class="box">5</div>
+          <div><h4><span class="n">STEP 4</span>パイプラインを通す</h4><div class="d">偵察 → 侵入 → 権限昇格の順で実行し、侵入失敗時のスキップも確認する。</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="demo-foot">今日の成果は「サブエージェントが端から端まで連携する」こと。ここまでできればコマ3から並行開発に入れる。</div>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">04</span>ゲートA — ここまでできたら並行開発へ</h2>
+  <p class="sec-lede">
+    ゲートAは、個別開発を始めてよいかを判断する関所。
+    全員がここを通過するまで、各自の判断で共通型を変えない。
+  </p>
+
+  <div class="grid g2">
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>テストが通る</h4>
+      <p><code>pytest</code> の全テストが通る。最小限のサブエージェントでもよいので、最低限の単体テストがある。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>パイプラインが最後まで走る</h4>
+      <p><code>python core.py --pipeline "..."</code> が3段を通り、最後に <code>PrivEscResult</code> まで返る。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>失敗分岐がある</h4>
+      <p><code>Foothold.kind == "none"</code> のとき、agent03 がスキップされる。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>WebUI で見える</h4>
+      <p>3エージェント分の実行記録が WebUI の <code>runs</code> に表示される。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>共通スキーマを3人が承認した</h4>
+      <p>以降は個人の判断で勝手に変えない。変更が必要なら合意手順を踏む。</p>
+    </div>
+    <div class="card tint2">
+      <span class="k">CHECK</span>
+      <h4>作業範囲が分かれている</h4>
+      <p>A/B/C がそれぞれ触るファイルと、レビュー必須の共通ファイルが明確になっている。</p>
+    </div>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">05</span>ゲートA後の分担</h2>
+  <p class="sec-lede">
+    ゲートAを通過したら、3人は並行開発に入る。
+    担当者は自分のエージェント、テスト、評価を中心に触る。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:18%">担当</th><th>自由に触るファイル</th><th style="width:30%">レビュー必須</th></tr></thead>
+      <tbody>
+        <tr><td>A</td><td><code>agent01.py</code> / <code>tests/test_agent01.py</code> / <code>evals/eval_agent01.py</code></td><td rowspan="3"><code>config.py</code><br><code>core.py</code><br><code>.env.example</code><br><code>templates/</code><br><code>static/</code></td></tr>
+        <tr><td>B</td><td><code>agent02.py</code> / <code>tests/test_agent02.py</code> / <code>evals/eval_agent02.py</code></td></tr>
+        <tr><td>C</td><td><code>agent03.py</code> / <code>tests/test_agent03.py</code> / <code>evals/eval_agent03.py</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">開発中のコツ</span>
+    <p>前段の完成を待たない。B は <code>AttackSurface</code> と <code>Finding[]</code> の固定 JSON、
+    C は <code>Foothold</code> の固定 JSON を <code>tests/fixtures/</code> に置いて開発を始める。
+    フィクスチャが、実装より先に共通の前提になる。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>このコマの要点</h2>
+  <div class="grid g3">
+    <div class="card tint2"><h4>1. まず共通基盤</h4><p>最初に触るのは <code>agentXX.py</code> ではなく <code>config.py</code> と <code>core.py</code>。</p></div>
+    <div class="card tint2"><h4>2. 完成度より接続</h4><p>今日の目的は「賢い」ではなく「サブエージェントが端から端まで連携する」。</p></div>
+    <div class="card tint2"><h4>3. ゲートAまで個別開発しない</h4><p>共通スキーマが確定してから、3人で並行開発に入る。</p></div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer class="foot">
+    <span>Z4 ／ コマ2 テンプレートからプロトタイプを完成させる</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script src="../01/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コマ6 — 最終対決と成果報告書 ｜ Z4</title>
+<link rel="stylesheet" href="../01/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ6</b><span>FINAL RUN</span></a>
+    <nav class="topnav">
+      <a href="../index.html">トップ</a>
+      <a href="../01/index.html">コマ1</a>
+      <a href="../02/index.html">コマ2</a>
+      <a href="../03-05/index.html">コマ3-5</a>
+      <a href="index.html" class="is-current">コマ6</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">コマ6 ／ 最終ランと成果報告書</p>
+  <h1>Z2 ハードニングAIエージェントとの対決と<br>成果報告書の作成</h1>
+  <p class="lede">
+    コマ6では、ここまで改良してきたペンテストAIエージェントを最終環境で実行し、
+    Z2 ハードニングAIエージェントとの対決結果を確認する。
+  </p>
+  <p class="lede">
+    最終的な成果は、勝敗だけではなく「どこまで自動化できたか」「どこで止まったか」「なぜそうなったか」を説明できること。
+    実行結果を成果報告書にまとめる。
+  </p>
+</div>
+
+<section class="blk wrap rv">
+  <h2><span class="num">00</span>タイムライン</h2>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:22%">時間</th><th style="width:34%">内容</th><th>やること</th></tr></thead>
+      <tbody>
+        <tr><td><strong>14:30-15:30</strong></td><td>Z2 ハードニングAIエージェントとの対決</td><td>最終版のエージェントを実行し、到達フェーズ・証拠・所要時間・トークン数を記録する。</td></tr>
+        <tr><td><strong>15:30-17:00</strong></td><td>結果整理と発表準備</td><td>実装を止め、ログ・証拠・改良内容を整理して、報告書に入れる材料を確定する。</td></tr>
+        <tr><td><strong>17:00-17:30</strong></td><td>成果報告書の仕上げ</td><td>実行結果、改良内容、失敗分析、残課題を報告書にまとめる。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">01</span>Z2 ハードニングAIエージェントとの対決</h2>
+  <p class="sec-lede">
+    対決では、Z2 側が防御・ハードニングした標的に対して、Z4 側のペンテストAIエージェントがどこまで到達できるかを確認する。
+    重要なのは、結果を証拠付きで残すこと。
+  </p>
+
+  <div class="grid g3">
+    <div class="card tint">
+      <span class="k">BEFORE</span>
+      <h4>実行前に固定する</h4>
+      <p>使うブランチ、モデル、設定、対象標的、制限時間を記録する。途中で都合よく条件を変えない。</p>
+    </div>
+    <div class="card tint">
+      <span class="k">RUN</span>
+      <h4>最終版を実行する</h4>
+      <p>偵察 → 侵入 → 権限昇格を通しで走らせる。必要な承認ゲートは記録を残して通す。</p>
+    </div>
+    <div class="card tint">
+      <span class="k">AFTER</span>
+      <h4>結果を保存する</h4>
+      <p>到達フェーズ、取得した証拠、失敗分類、所要時間、LLM要求数、トークン数を保存する。</p>
+    </div>
+  </div>
+
+  <h3>見る指標</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:28%">指標</th><th>意味</th></tr></thead>
+      <tbody>
+        <tr><td>到達フェーズ</td><td>偵察止まり、脆弱性候補、侵入成功、権限昇格成功、root / admin 到達。</td></tr>
+        <tr><td>証拠</td><td><code>id</code>、標的固有情報、root 限定ファイルなど、客観的に検証できる出力。</td></tr>
+        <tr><td>所要時間</td><td>開始から終了までの時間。成功時は短縮できたか、失敗時はどこで時間を使ったかを見る。</td></tr>
+        <tr><td>LLM要求数・トークン数</td><td>判断や委譲に使ったコスト。改善前後で比較する。</td></tr>
+        <tr><td>失敗分類</td><td>偵察漏れ、侵入失敗、権限昇格失敗、ループ、成功判定ミス、予算切れなど。</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <h2><span class="num">02</span>成果報告書の作成</h2>
+  <p class="sec-lede">
+    17:00-17:30 は成果報告書を仕上げる時間。
+    実装の説明だけでなく、設計判断、改良の根拠、測定結果、残った課題を書く。
+  </p>
+
+  <div class="grid g2">
+    <div class="card">
+      <span class="k">SECTION 1</span>
+      <h4>設計</h4>
+      <p>3エージェントの責務分担、共通スキーマ、<code>Foothold</code> の受け渡し、安全機構を説明する。</p>
+    </div>
+    <div class="card">
+      <span class="k">SECTION 2</span>
+      <h4>改良</h4>
+      <p>コマ3-5でどの失敗を見つけ、何を直したか。プロンプト、ツール、状態、評価のどれを変えたかを書く。</p>
+    </div>
+    <div class="card">
+      <span class="k">SECTION 3</span>
+      <h4>結果</h4>
+      <p>最終対決での到達フェーズ、成功・失敗、証拠、所要時間、LLM要求数、トークン数を示す。</p>
+    </div>
+    <div class="card">
+      <span class="k">SECTION 4</span>
+      <h4>考察と残課題</h4>
+      <p>うまくいった理由、止まった理由、次に直すならどこかを書く。成功した場合も、時間やトークン数をさらに削減できるか検討する。</p>
+    </div>
+    <div class="card">
+      <span class="k">SECTION 5</span>
+      <h4>感想・得た学び</h4>
+      <p>開発を通して分かったこと、難しかったこと、設計や実装で考え方が変わった点を書く。技術的な学びだけでなく、チーム開発や評価の進め方についての気づきも含める。</p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">書くべきこと</span>
+    <p>「root を取れた / 取れなかった」だけでは不十分。
+    <strong>どこまで進み、何を根拠にそう判断し、どの改善が効いたのか</strong>を、ログと証拠に基づいて書く。
+    最後に、今回の開発で得た学びや感想も自分の言葉で残す。</p>
+  </div>
+</section>
+
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>提出前チェック</h2>
+  <div class="grid g3">
+    <div class="card tint2"><h4>証拠がある</h4><p>成功主張に対応するログ、コマンド出力、artifact が残っている。</p></div>
+    <div class="card tint2"><h4>数字がある</h4><p>所要時間、LLM要求数、トークン数、到達フェーズが書かれている。</p></div>
+    <div class="card tint2"><h4>残課題がある</h4><p>できなかったことを隠さず、次に直す場所として説明できている。</p></div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer class="foot">
+    <span>Z4 ／ コマ6 最終対決と成果報告書</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script src="../01/assets/app.js"></script>
+</body>
+</html>

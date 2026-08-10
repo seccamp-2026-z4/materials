@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>座学③ マルチエージェント設計論 ｜ Z4 コマ1</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🌊</text></svg>">
+<style>
+/* --- この回だけの部品 --- */
+.agentbar { margin-bottom: 12px; }
+.agentbar .lab {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; margin-bottom: 4px;
+}
+.agentbar .nm { font-weight: 700; }
+.agentbar .tk { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+.agentbar .trk {
+  height: 12px; background: #eef4f6; border-radius: 2px; overflow: hidden; position: relative;
+}
+.agentbar .fil {
+  display: block; height: 100%; width: 0; border-radius: 2px;
+  transition: width .5s cubic-bezier(.22,1,.36,1), background .3s;
+}
+.agentbar .lim {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--coral); opacity: .55;
+}
+.agentbar.dim { opacity: .3; transition: opacity .5s; }
+.agentbar.gone { opacity: .12; }
+.panel {
+  border: 1px solid var(--line); border-radius: 3px; padding: 18px;
+}
+.panel h5 { margin: 0 0 4px; font-size: 14px; font-weight: 700; }
+.panel .sub { font-size: 11.5px; color: var(--ink-3); margin-bottom: 16px; display: block; }
+.evlog {
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.7; color: var(--ink-3);
+  max-height: 118px; overflow: auto; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 14px;
+}
+.meter { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 11.5px; }
+.meter .trk { flex: 1; height: 6px; background: #eef4f6; border-radius: 3px; overflow: hidden; }
+.meter .fil { display: block; height: 100%; transition: width .5s, background .5s; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html"><b>Z4 ／ コマ1</b><span>SEMINAR MATERIALS</span></a>
+    <nav class="topnav">
+      <a href="index.html">概要</a>
+      <a href="lab-portal.html">⓪ ラボ環境</a>
+      <a href="lecture-01.html">① ペンテスト基礎</a>
+      <a href="lecture-02.html">② エージェント基礎</a>
+      <a href="lecture-03.html" class="is-current">③ マルチエージェント</a>
+      <a href="lecture-04.html">④ アーキテクチャ読解</a>
+      <a href="appendix-commands.html">おまけ コマンド</a>
+    </nav>
+  </div>
+  <div class="readbar"></div>
+</header>
+
+<main>
+
+<div class="hero wrap">
+  <p class="eyebrow">座学 ③ ／ 11:05 – 11:45 ／ このコマの中心</p>
+  <h1>マルチエージェント設計論</h1>
+  <p class="lede">
+    分けること自体は目的ではない。<strong>分けるとコストが増える</strong>（LLM要求数が増え、情報が伝言ゲームで劣化し、デバッグが難しくなる）。
+    それでも分けるのは、分けないと解けない問題があるから。
+  </p>
+  <p class="lede">
+    この座学では<strong>「なぜ分けるのか」を定量的な理由として押さえ、「どう分けるか」の設計判断を4つ</strong>扱う。
+    ここで得た語彙が、以降の改善サイクルと成果報告書の「設計」章の土台になる。
+  </p>
+
+  <div class="note warn" style="margin-top:28px">
+    <span class="lbl">図と例について</span>
+    <p>このページの図や例に出てくる<strong>「偵察役／侵入役／昇格役／調査役」というサブエージェントの分け方は、説明のための一例</strong>
+    （委譲の起点となる <strong>Orchestrator</strong> だけは、テンプレート実装に実在する名前）。
+    <mark>実際にどう分けるか（そもそも分けるか、何体にするか、何と呼ぶか）は、テンプレート実装を読んだうえで各自が決める。</mark>
+    ここで身につけてほしいのは特定の構成ではなく、<strong>構成を決めるときの判断軸</strong>のほう。</p>
+  </div>
+</div>
+
+<!-- ============ 1. なぜ分けるか ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">1</span>単一エージェントに全部やらせない理由</h2>
+  <p class="sec-lede">
+    理由は3つ。<strong>コンテキスト長・責務分離・ツール選択精度</strong>。
+    どれも「なんとなく良さそう」ではなく、放置すると計測値として悪化する具体的な問題として出る。
+  </p>
+
+  <h3>理由 1 — コンテキスト長</h3>
+  <p>
+    <a href="lecture-02.html">座学②</a>で見たとおり、履歴は毎ターン伸びる。
+    単一エージェントは<strong>偵察の生ログも、失敗した exploit のエラーも、内部偵察の一覧も、全部同じ1本の履歴に積む</strong>。
+    分割すると、各サブエージェントの履歴は<mark>仕事が終わった時点で捨てられる</mark>。親に返るのは結論だけ。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">同じ標的を攻略したとき、コンテキストがどうなるか</span>
+      <span class="ctl">
+        <button class="btn primary" id="mv-play">▶ 実行を再生</button>
+        <button class="btn" id="mv-reset">リセット</button>
+        <span class="rng-lbl" id="mv-step">0 / 16</span>
+      </span>
+    </div>
+    <div class="demo-body">
+      <div class="grid g2" style="gap:20px">
+        <div class="panel">
+          <h5 style="color:#d24a33">単一エージェント</h5>
+          <span class="sub">1本の履歴に全部を積む</span>
+          <div id="mv-single"></div>
+          <div class="meter">
+            <span style="color:var(--ink-3)">判断の質</span>
+            <span class="trk"><span class="fil" id="mv-q1" style="width:100%;background:#2ec4a0"></span></span>
+            <span class="rng-lbl" id="mv-q1t">良好</span>
+          </div>
+          <div class="evlog" id="mv-log1"></div>
+        </div>
+
+        <div class="panel">
+          <h5 style="color:#1d9b7c">マルチエージェント</h5>
+          <span class="sub">Orchestrator が委譲し、サブの履歴は破棄される</span>
+          <div id="mv-multi"></div>
+          <div class="meter">
+            <span style="color:var(--ink-3)">判断の質</span>
+            <span class="trk"><span class="fil" id="mv-q2" style="width:100%;background:#2ec4a0"></span></span>
+            <span class="rng-lbl" id="mv-q2t">良好</span>
+          </div>
+          <div class="evlog" id="mv-log2"></div>
+        </div>
+      </div>
+    </div>
+    <div class="demo-foot" id="mv-foot">再生すると、同じ作業を2つの構成でやったときのコンテキストの伸び方が並んで出る。</div>
+  </div>
+
+  <div class="note key">
+    <span class="lbl">本質</span>
+    <p>マルチエージェントの正体は<strong>「コンテキストの使い捨て」</strong>。
+    サブエージェントは大量の生情報を読み込んで、<mark>結論だけを返し、途中の詳細は親に渡さない</mark>。
+    親のコンテキストには結論だけが積まれるので、長時間の作業でも必要な情報を保持しやすい。
+    <br><br><strong>裏を返せば</strong>：捨てた情報は二度と戻らない。<strong>何を返り値の型に含めるかが設計の全て</strong>になる。
+    ここが甘いと「サブは見つけていたのに親が知らない」という失敗が起きる。</p>
+  </div>
+
+  <h3>理由 2 — 責務分離</h3>
+  <p>
+    プロンプトは長くなるほど、個々の指示が効かなくなる。
+    偵察・侵入・昇格の全てを1つのシステムプロンプトに書くと、<strong>数千トークンの「指示の塊」になり、どれも中途半端に効く</strong>状態になる。
+  </p>
+
+  <div class="grid g2">
+    <div class="card" style="border-color:rgba(244,103,79,.3)">
+      <span class="k" style="color:#d24a33">単一の場合</span>
+      <h4>「あなたはペンテスターです。まず偵察し、次に侵入し、それから昇格し、ただし〜のときは〜し、…」</h4>
+      <p>指示が競合する。<strong>「網羅的に列挙せよ」と「早く侵入に移れ」は矛盾する</strong>が、
+      1つのプロンプトに両方書かれていると、LLM はその場の気分でどちらかを選ぶ。<strong>再現性が落ちる。</strong></p>
+    </div>
+    <div class="card" style="border-color:rgba(46,196,160,.35)">
+      <span class="k" style="color:#1d9b7c">分けた場合</span>
+      <h4>偵察役：「攻撃面の確定だけが仕事。侵入はしない。打ち切り理由を必ず書け」</h4>
+      <p>各エージェントのプロンプトが短く、目的が1つになる。
+      <strong>矛盾する指示は、エージェント間の境界として表現される。</strong>
+      「いつ偵察をやめて侵入に移るか」は Orchestrator の判断になり、明示的に書ける。</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="lbl">本ゼミの役割分担がこの形になっている理由</span>
+    <p>担当A＝偵察／外部調査、担当B＝侵入、担当C＝内部偵察／権限昇格。
+    <strong>責務が分離されているから、3人が同じリポジトリを同時に触ってもコンフリクトしない。</strong>
+    プロンプト・ツール・状態スキーマのオーナーが一意に決まる。設計上の分離が、そのまま作業分担になっている。</p>
+  </div>
+
+  <h3>理由 3 — ツール選択精度</h3>
+  <p>
+    ツールは<a href="lecture-02.html">座学②</a>で見たとおり、説明文込みで毎回 LLM に渡される。
+    <strong>選択肢が増えるほど、似たツールの取り違えと、そもそも呼ばない失敗が増える。</strong>
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">1体に持たせるツール数と、選択の失敗</span>
+      <span class="ctl">
+        <span class="rng-lbl">ツール数</span>
+        <input type="range" id="tl-range" min="3" max="28" value="6">
+        <span class="rng-lbl" id="tl-n">6</span>
+      </span>
+    </div>
+    <div class="demo-body">
+      <svg id="tl-svg" viewBox="0 0 860 240" role="img" aria-label="ツール数と選択精度の関係（概念図）"></svg>
+    </div>
+    <div class="demo-foot" id="tl-foot"></div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">この図は概念図</span>
+    <p>曲線の形はモデル・ツールの説明文の質・タスクによって大きく変わる。<strong>数値は当てにしないこと。</strong>
+    重要なのは傾向 — <mark>ツールは足せば足すほど強くなるわけではない</mark>という点。
+    <strong>実際の数値は、コマ2以降で各自が測る。</strong>
+    「ツールを1つ足したら、他のツールの呼ばれ方がどう変わったか」を見るのが、コマ3以降の改善の基本動作になる。</p>
+  </div>
+</section>
+
+<!-- ============ 2. 委譲の粒度 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">2</span>委譲の粒度</h2>
+  <p class="sec-lede">
+    分けると決めたあと、<strong>どのくらいの大きさで切るか</strong>。細かすぎても粗すぎても壊れる。
+    3つの粒度を並べて、それぞれの壊れ方を見る。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">粒度を選ぶ</span>
+      <span class="ctl">
+        <div class="seg" id="gr-seg">
+          <button data-v="0">粗すぎる</button>
+          <button data-v="1" class="is-on">適切</button>
+          <button data-v="2">細かすぎる</button>
+        </div>
+      </span>
+    </div>
+    <div class="demo-body">
+      <svg id="gr-svg" viewBox="0 0 860 260" role="img" aria-label="委譲の粒度3パターン"></svg>
+    </div>
+    <div class="demo-foot" id="gr-foot"></div>
+  </div>
+
+  <h3>粒度を決める判断基準</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:22%">問い</th><th style="width:38%">YES なら分ける</th><th>NO なら分けない</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>大量の生情報を読む必要があるか</strong></td>
+          <td>読み取り専用の一時的なコンテキストを別に持たせる価値がある。<strong>これが最も有力な分割理由</strong></td>
+          <td>親が直接ツールを呼べばよい。委譲のオーバーヘッドが無駄</td>
+        </tr>
+        <tr>
+          <td><strong>指示が親と矛盾するか</strong></td>
+          <td>「網羅的に」vs「早く進め」のような競合は、境界にすると解決する</td>
+          <td>同じ方針で動くなら、同じプロンプトの中にいてよい</td>
+        </tr>
+        <tr>
+          <td><strong>返り値を型で定義できるか</strong></td>
+          <td>定義できる＝責務が明確。<code>ReconResult</code> のように書ける</td>
+          <td>型にできない＝そもそも仕事の定義が曖昧。<strong>分ける前に責務を考え直す</strong></td>
+        </tr>
+        <tr>
+          <td><strong>専用ツールが3つ以上あるか</strong></td>
+          <td>親のツール一覧から隔離できる。選択精度が上がる</td>
+          <td>1〜2個なら親に持たせたほうが速い</td>
+        </tr>
+        <tr>
+          <td><strong>失敗しても親が続行できるか</strong></td>
+          <td>失敗を局所化できる。<strong>「このサブが死んでも別ベクタへ」が書ける</strong></td>
+          <td>失敗が即座に全体の失敗なら、分けても回復性は上がらない</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note key">
+    <span class="lbl">実務的な目安</span>
+    <p><strong>「1回の委譲で 5〜30 ターン程度の作業をさせる」</strong>あたりが扱いやすい。
+    5ターン未満なら親が直接ツールを呼べばよく、30ターンを超えるとサブ自身のコンテキストが上限に近づき始め、
+    かつ<strong>途中経過が親から見えないブラックボックスの時間が長すぎる</strong>。
+    テンプレート実装がどの粒度で切っているかは<a href="lecture-04.html">座学④</a>で確認する。</p>
+  </div>
+</section>
+
+<!-- ============ 3. トポロジ ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">3</span>サブエージェント間の直接相談を許すか</h2>
+  <p class="sec-lede">
+    侵入役が「この製品の PoC を探したい」と思ったとき、<strong>調査役に直接聞きにいってよいか、Orchestrator を経由すべきか</strong>。
+    これは好みの問題ではなく、<strong>制御可能性と柔軟性のトレードオフ</strong>。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">トポロジの比較</span>
+      <span class="ctl">
+        <div class="seg" id="tp-seg">
+          <button data-v="0" class="is-on">スター（中央集権）</button>
+          <button data-v="1">部分メッシュ</button>
+          <button data-v="2">フルメッシュ</button>
+        </div>
+        <button class="btn" id="tp-anim">▶ 情報の流れ</button>
+      </span>
+    </div>
+    <div class="demo-body">
+      <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start">
+        <svg id="tp-svg" viewBox="0 0 460 330" role="img" aria-label="エージェント間トポロジ"></svg>
+        <div id="tp-detail" style="font-size:13.5px;line-height:1.85"></div>
+      </div>
+    </div>
+    <div class="demo-foot" id="tp-foot"></div>
+  </div>
+
+  <div class="note">
+    <span class="lbl">テンプレート実装の立ち位置</span>
+    <p>テンプレート実装は <strong>調査役への相談を軸に組まれている</strong>。
+    つまり「他のエージェントが調査役を呼べる」形の<strong>部分メッシュ</strong>になっている。
+    <br><br>
+    ここには設計上の弱点が埋まっている。<mark>検索で有用な情報が見つからないときのフォールバックが設計されていないと、そこで停止する</mark>。
+    <strong>検索で出てこない対象</strong>に当たったとき何をするかは、どこかで必ず問われる。
+    構成を見直すタイミングで、ここをどうするかが議論の中心になるはず。</p>
+  </div>
+</section>
+
+<!-- ============ 4. 失敗回復とループ検知 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">4</span>失敗回復とループ検知</h2>
+  <p class="sec-lede">
+    マルチエージェントでは、失敗が<strong>2つの層</strong>で起きる。サブエージェント内部の失敗（<a href="lecture-02.html">座学②</a>の4層）と、
+    <strong>「サブに任せたが成果が返ってこない」という委譲レベルの失敗</strong>。後者の代表がループ。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">ループ検知 — 実行トレースを流して、どの検知器が引っかかるか見る</span>
+      <span class="ctl">
+        <button class="btn primary" id="lp2-play">▶ 再生</button>
+        <button class="btn" id="lp2-reset">リセット</button>
+      </span>
+    </div>
+    <div class="demo-body" style="padding:0">
+      <div style="display:grid;grid-template-columns:1.25fr 1fr">
+        <div style="padding:18px 20px;border-right:1px solid var(--line)">
+          <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:12px">EXECUTION TRACE</div>
+          <div id="lp2-trace" style="font-family:var(--mono);font-size:11.5px;line-height:1.9;min-height:300px"></div>
+        </div>
+        <div style="padding:18px 20px;background:var(--paper-2)">
+          <div style="font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);margin-bottom:12px">DETECTORS</div>
+          <div id="lp2-det"></div>
+        </div>
+      </div>
+    </div>
+    <div class="demo-foot" id="lp2-foot">実際のログでよく見る形。予算を使い切るまで止まらない。</div>
+  </div>
+
+  <h3>検知したあと、何をするか</h3>
+  <p>検知だけでは意味がない。<strong>検知後の行動を設計しないと、検知しても同じ場所で止まるだけ</strong>になる。</p>
+  <div class="grid g4">
+    <div class="card">
+      <span class="k">ESCALATION 1</span>
+      <h4>制約を追加して再委譲</h4>
+      <p>「<code>tried</code> にある手は禁止。別のアプローチで」と明示して同じサブを呼び直す。<strong>最も低コスト。まずこれ。</strong></p>
+    </div>
+    <div class="card">
+      <span class="k">ESCALATION 2</span>
+      <h4>別のサブに依頼する</h4>
+      <p>侵入役に有効な候補が残っていなければ調査役に別角度で調べさせる、内部偵察に戻る。<strong>視点を変える。</strong></p>
+    </div>
+    <div class="card">
+      <span class="k">ESCALATION 3</span>
+      <h4>フェーズを戻す</h4>
+      <p>侵入で有効なベクタが残っていなければ偵察に戻る。<a href="lecture-01.html">座学①</a>で見た<strong>後戻りの経路</strong>がここで効く。</p>
+    </div>
+    <div class="card">
+      <span class="k">ESCALATION 4</span>
+      <h4>打ち切って記録する</h4>
+      <p><strong>「どこで止まったか、なぜか」を構造化して残す。</strong>これが書けていれば、評価では十分な成果になる。</p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">評価との関係</span>
+    <p>到達目標は<strong>全標的の攻略ではなく、「どこで止まったか、なぜか」を説明できること</strong>。
+    エスカレーション4がきちんと実装されていれば、止まったこと自体が測定可能な結果になる。
+    <mark>黙って予算を使い切って終わるのが最悪</mark> — 何も分からないまま4時間が消える。</p>
+  </div>
+</section>
+
+<!-- ============ 5. 予算配分 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">5</span>予算配分</h2>
+  <p class="sec-lede">
+    LLM 要求数には上限がある（コストと時間の両方で）。マルチエージェントでは
+    <strong>親が使った分＋全サブが使った分</strong>が合計になるので、放っておくと1つのサブが全部使い切る。
+  </p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <span class="t">1標的あたり 120 リクエストを、どう配るか</span>
+      <span class="ctl">
+        <div class="seg" id="bg-seg">
+          <button data-v="0" class="is-on">均等</button>
+          <button data-v="1">偵察厚め</button>
+          <button data-v="2">侵入厚め</button>
+          <button data-v="3">動的</button>
+        </div>
+      </span>
+    </div>
+    <div class="demo-body">
+      <svg id="bg-svg" viewBox="0 0 860 220" role="img" aria-label="予算配分パターン"></svg>
+    </div>
+    <div class="demo-foot" id="bg-foot"></div>
+  </div>
+
+  <span class="code-cap">予算を分けて渡す — Pydantic AI では usage を引き継ぐ</span>
+  <pre><code><span class="c-kw">from</span> pydantic_ai.usage <span class="c-kw">import</span> UsageLimits
+
+<span class="c-de">@orchestrator.tool</span>
+<span class="c-kw">async def</span> <span class="c-fn">delegate_recon</span>(ctx: <span class="c-ty">RunContext</span>[<span class="c-ty">Deps</span>], instruction: <span class="c-ty">str</span>) -> <span class="c-ty">ReconResult</span>:
+    <span class="c-st">"""偵察エージェントに委譲する。攻撃面の確定だけを依頼すること。"""</span>
+    budget = ctx.deps.budget.take(<span class="c-st">"recon"</span>)        <span class="c-cm"># 配分表から取り出す</span>
+    r = <span class="c-kw">await</span> recon_agent.run(
+        instruction,
+        deps=ctx.deps,
+        usage=ctx.usage,                             <span class="c-cm"># ← 親子で使用量を合算して数える</span>
+        usage_limits=UsageLimits(request_limit=budget),
+    )
+    ctx.deps.state.merge_recon(r.output)             <span class="c-cm"># 共有状態へ反映</span>
+    <span class="c-kw">return</span> r.output                                 <span class="c-cm"># 親の履歴に載るのは、この型の分だけ</span>
+</code></pre>
+
+  <div class="note key">
+    <span class="lbl">3つの押さえどころ</span>
+    <p>
+    <strong>① <code>usage=ctx.usage</code> を渡す</strong>：渡し忘れると、サブの消費が親の上限に数えられず、合計が上限を大きく超える。<br>
+    <strong>② 返り値は型で縛る</strong>：親の履歴に積まれるのは <code>ReconResult</code> の中身だけ。ここに何を入れるかが、サブの捨てた情報のうち何が生き残るかを決める。<br>
+    <strong>③ 状態への反映と返り値は別物</strong>：詳細は共有状態に書き、親の履歴には要点だけ返す。これで<mark>「情報は残るが、コンテキストは伸びない」</mark>が両立する。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 設計判断の記録 ============ -->
+<section class="blk wrap rv">
+  <h2><span class="num">6</span>設計判断は記録する</h2>
+  <p class="sec-lede">
+    ここまでの5つは全て<strong>トレードオフのある判断</strong>で、正解は標的とモデルに依存する。
+    <strong>「何をどう決めたか」と「なぜそう決めたか」を残す</strong>のが、成果報告書の「システム構成」章と「考察」章の中身になる。
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th style="width:20%">判断</th><th style="width:32%">選択肢</th><th>記録すべきこと</th></tr></thead>
+      <tbody>
+        <tr><td><strong>分割するか</strong></td><td>単一 / 分割</td><td>分割した理由（どの制約に当たったか）。<strong>実測値があると説得力が増す</strong></td></tr>
+        <tr><td><strong>粒度</strong></td><td>粗い / 中 / 細かい</td><td>1委譲あたりの平均ターン数。粒度を変えたときの成功率の変化</td></tr>
+        <tr><td><strong>トポロジ</strong></td><td>スター / 部分メッシュ / フルメッシュ</td><td>直接相談を許した相手と、その理由。許さなかった相手と、その理由</td></tr>
+        <tr><td><strong>ループ検知</strong></td><td>完全一致 / 正規化 / 進捗ベース</td><td>検知した回数と、エスカレーション後に前進できた割合</td></tr>
+        <tr><td><strong>予算配分</strong></td><td>固定 / 動的</td><td>配分と、実際の消費分布。<strong>「どこで予算を消費したか」</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">改善サイクルにつながる</span>
+    <p>以降は<strong>「個別エージェントの改善」と「チーム構成そのものの設計」を行き来する</strong>時間。
+    節目でこの座学に立ち返り、<strong>動かして見えた実態と突き合わせる</strong>ことになっている。
+    「委譲の粒度は適切だったか」「責務が滲み出していないか」を3人で点検するので、
+    <mark>今日決めたことを、そのとき参照できる形で書いておくこと。</mark></p>
+  </div>
+</section>
+
+<!-- ============ まとめ ============ -->
+<section class="blk wrap rv">
+  <hr class="rule">
+  <h2><span class="num">＊</span>この座学の要点</h2>
+  <div class="grid g3">
+    <div class="card tint2"><h4>1. 分割の正体はコンテキストの使い分け</h4><p>サブは途中の詳細を親に渡さず、結論だけ返す。だから返り値の型が設計の全て。</p></div>
+    <div class="card tint2"><h4>2. 分割にはコストがある</h4><p>要求数増・伝言ゲーム・デバッグ困難。理由なく分けない。</p></div>
+    <div class="card tint2"><h4>3. 判断は5つ</h4><p>分けるか／粒度／トポロジ／ループ検知／予算配分。全部トレードオフ。</p></div>
+  </div>
+  <p style="margin-top:24px">
+    次の <a href="lecture-04.html">座学④</a> では、ここで扱った設計判断が
+    <strong>テンプレート実装で実際にどう実装されているか</strong>を突き合わせる。
+    <mark>コードを読むのではなく、設計判断の実例として読む。</mark>「なぜこの設計なのか」を議論しながら進める。
+  </p>
+</section>
+
+<div class="wrap">
+  <div class="pager">
+    <a href="lecture-02.html"><span class="dir">PREV</span><span class="nm">← 座学② AIエージェントの基礎</span></a>
+    <a class="next" href="lecture-04.html"><span class="dir">NEXT</span><span class="nm">座学④ テンプレート実装のアーキテクチャ読解 →</span></a>
+  </div>
+  <footer class="foot">
+    <span>Z4 ／ コマ1 座学③ マルチエージェント設計論</span>
+    <span>2026-08-11</span>
+  </footer>
+</div>
+
+</main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    fontFamily: '-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif',
+    themeVariables: {
+      primaryColor: '#f6fbfc', primaryTextColor: '#10262e', primaryBorderColor: '#0e8f9e',
+      lineColor: '#6f8791', secondaryColor: '#fdf8f1', tertiaryColor: '#ffffff', fontSize: '13px'
+    },
+    flowchart: { curve: 'basis', padding: 14 }
+  });
+  window.mermaid = mermaid;
+</script>
+
+<script src="assets/app.js"></script>
+<script>
+/* =======================================================
+   1-1. 単一 vs マルチ のコンテキスト比較
+   ======================================================= */
+(function () {
+  const LIMIT = 200000;
+  const SCALE = 240000;   // バー100%に相当
+
+  function bar(id, name, color) {
+    return '<div class="agentbar" id="' + id + '">' +
+      '<div class="lab"><span class="nm" style="color:' + color + '">' + name + '</span>' +
+      '<span class="tk">0k</span></div>' +
+      '<div class="trk"><span class="fil" style="background:' + color + '"></span>' +
+      '<span class="lim" style="left:' + (LIMIT / SCALE * 100) + '%"></span></div></div>';
+  }
+
+  document.getElementById('mv-single').innerHTML = bar('b-single', 'Agent（全部担当）', '#f4674f');
+  document.getElementById('mv-multi').innerHTML =
+    bar('b-cond', 'Orchestrator', '#0e8f9e') +
+    bar('b-recon', '└ 偵察役', '#14b8c4') +
+    bar('b-expl', '└ 侵入役', '#2ec4a0') +
+    bar('b-priv', '└ 昇格役', '#f2b544');
+
+  // イベント列：単一は積み上げ、マルチはサブに積んで返却時に破棄
+  const ev = [
+    { d: '全ポートスキャン（生出力 12k）',      s: 14000, m: ['recon', 14000] },
+    { d: 'サービス版特定・追加スキャン',        s: 9000,  m: ['recon', 9000] },
+    { d: 'Web ディレクトリ列挙（生出力 21k）',   s: 24000, m: ['recon', 24000] },
+    { d: 'ページ内容の確認 ×6',                s: 16000, m: ['recon', 16000] },
+    { d: '偵察役完了 → 結論を返す',            s: 0,     m: ['recon', 'RET', 3200] },
+    { d: 'CVE 検索（検索結果 8k ×3）',          s: 26000, m: ['expl', 26000] },
+    { d: 'PoC 取得・読解',                     s: 18000, m: ['expl', 18000] },
+    { d: 'PoC 実行 → 失敗（エラー 4k）',        s: 12000, m: ['expl', 12000] },
+    { d: '適応して再実行 ×4（毎回エラー）',      s: 22000, m: ['expl', 22000] },
+    { d: '別ベクタへ切替・再検索',              s: 19000, m: ['expl', 19000] },
+    { d: 'シェル取得 → 結論を返す',             s: 0,     m: ['expl', 'RET', 2400] },
+    { d: '内部偵察（ps/net/ファイル列挙 26k）',  s: 29000, m: ['priv', 29000] },
+    { d: 'SUID / sudo / cron / cap 列挙',      s: 17000, m: ['priv', 17000] },
+    { d: '候補バイナリの strings ×5',           s: 21000, m: ['priv', 21000] },
+    { d: '昇格試行 ×3（うち2回失敗）',          s: 16000, m: ['priv', 16000] },
+    { d: 'root 取得 → 結論を返す',              s: 0,     m: ['priv', 'RET', 1800] }
+  ];
+
+  const st = { single: 4000, cond: 3000, recon: 0, expl: 0, priv: 0 };
+  const ids = { single: 'b-single', cond: 'b-cond', recon: 'b-recon', expl: 'b-expl', priv: 'b-priv' };
+  let i = 0, timer = null;
+
+  function paint(key, active) {
+    const el = document.getElementById(ids[key]);
+    const v = st[key];
+    const pct = Math.min(100, (v / SCALE) * 100);
+    el.querySelector('.fil').style.width = pct + '%';
+    el.querySelector('.tk').textContent = Math.round(v / 1000) + 'k';
+    const over = v > LIMIT;
+    el.querySelector('.fil').style.background = over ? '#f4674f' : (key === 'single' ? '#f7936a' : ({ cond: '#0e8f9e', recon: '#14b8c4', expl: '#2ec4a0', priv: '#f2b544' })[key]);
+    el.classList.toggle('dim', active === false);
+    if (over) el.querySelector('.tk').style.color = '#d24a33';
+  }
+
+  function quality(v, q, qt) {
+    const r = v / LIMIT;
+    let pct = 100, col = '#2ec4a0', label = '良好';
+    if (r > 0.45) { pct = 100 - (r - 0.45) * 130; }
+    pct = Math.max(6, Math.min(100, pct));
+    if (r > 0.6) { col = '#f2b544'; label = '劣化の兆候'; }
+    if (r > 0.85) { col = '#f7936a'; label = '取りこぼし多発'; }
+    if (r > 1) { col = '#f4674f'; label = '上限突破 / 続行不能'; }
+    document.getElementById(q).style.width = pct + '%';
+    document.getElementById(q).style.background = col;
+    document.getElementById(qt).textContent = label;
+    document.getElementById(qt).style.color = col;
+  }
+
+  function log(id, txt, col) {
+    const el = document.getElementById(id);
+    const d = document.createElement('div');
+    d.innerHTML = txt;
+    if (col) d.style.color = col;
+    el.appendChild(d); el.scrollTop = el.scrollHeight;
+  }
+
+  function step() {
+    if (i >= ev.length) { stop(); return; }
+    const e = ev[i];
+
+    // 単一
+    st.single += e.s;
+    paint('single');
+    quality(st.single, 'mv-q1', 'mv-q1t');
+    if (e.s > 0) {
+      log('mv-log1', '+ ' + e.d + '　<span style="color:#d24a33">+' + Math.round(e.s / 1000) + 'k</span>');
+    } else {
+      log('mv-log1', '  ' + e.d + '（履歴はそのまま残る）', '#9fb2ba');
+    }
+
+    // マルチ
+    const [who, amt, ret] = e.m;
+    if (amt === 'RET') {
+      const before = st[who];
+      st[who] = 0;
+      st.cond += ret;
+      paint(who, false);
+      document.getElementById(ids[who]).classList.add('gone');
+      paint('cond');
+      log('mv-log2', '↩ ' + e.d + '　<span style="color:#1d9b7c">' + Math.round(before / 1000) + 'k を破棄 → ' +
+        Math.round(ret / 1000) + 'k を親へ</span>');
+    } else {
+      st[who] += amt;
+      ['recon', 'expl', 'priv'].forEach((k) => paint(k, k === who));
+      paint('cond', false);
+      log('mv-log2', '+ ' + e.d + '　<span style="color:var(--ink-3)">' + who + ' +' + Math.round(amt / 1000) + 'k</span>');
+    }
+    const worst = Math.max(st.cond, st.recon, st.expl, st.priv);
+    quality(worst, 'mv-q2', 'mv-q2t');
+
+    i++;
+    document.getElementById('mv-step').textContent = i + ' / ' + ev.length;
+
+    const foot = document.getElementById('mv-foot');
+    if (st.single > LIMIT && !foot.dataset.warned) {
+      foot.dataset.warned = '1';
+      foot.innerHTML = '<b style="color:#d24a33">単一エージェントが上限を突破した。</b>' +
+        'ここから先は履歴を切り詰めるしかなく、<b>序盤に見つけた偵察結果が消える</b>。' +
+        'この状態で「さっきのポート、何番だっけ」は答えられない。';
+    } else if (i === ev.length) {
+      foot.innerHTML = '<b>完了。</b>単一 <b style="color:#d24a33">' + Math.round(st.single / 1000) + 'k</b>（上限突破）／ ' +
+        'マルチは Orchestrator <b style="color:#1d9b7c">' + Math.round(st.cond / 1000) + 'k</b> にとどまる。' +
+        '<b>同じ量の情報を処理して、親のコンテキストは ' + (st.single / st.cond).toFixed(0) + ' 分の1。</b>' +
+        'サブが読んだ生ログは全部捨てられ、型付きの結論だけが残った。';
+    }
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; document.getElementById('mv-play').textContent = '▶ 実行を再生'; } }
+  function reset() {
+    stop(); i = 0;
+    st.single = 4000; st.cond = 3000; st.recon = 0; st.expl = 0; st.priv = 0;
+    Object.keys(ids).forEach((k) => {
+      const el = document.getElementById(ids[k]);
+      el.classList.remove('gone', 'dim');
+      el.querySelector('.tk').style.color = '';
+      paint(k);
+    });
+    quality(st.single, 'mv-q1', 'mv-q1t'); quality(st.cond, 'mv-q2', 'mv-q2t');
+    document.getElementById('mv-log1').innerHTML = '';
+    document.getElementById('mv-log2').innerHTML = '';
+    document.getElementById('mv-step').textContent = '0 / ' + ev.length;
+    const f = document.getElementById('mv-foot');
+    delete f.dataset.warned;
+    f.innerHTML = '再生すると、同じ作業を2つの構成でやったときのコンテキストの伸び方が並んで出る。';
+  }
+
+  document.getElementById('mv-reset').addEventListener('click', reset);
+  document.getElementById('mv-play').addEventListener('click', function () {
+    if (timer) { stop(); return; }
+    if (i >= ev.length) reset();
+    this.textContent = '■ 停止';
+    timer = setInterval(step, 900);
+  });
+  reset();
+})();
+
+/* =======================================================
+   1-2. ツール数と選択精度（概念図）
+   ======================================================= */
+(function () {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.getElementById('tl-svg');
+  const W = 860, H = 240, P = { l: 56, r: 190, t: 24, b: 42 };
+  const NMAX = 28;
+  const X = (n) => P.l + (W - P.l - P.r) * ((n - 1) / (NMAX - 1));
+  const Y = (v) => H - P.b - (H - P.t - P.b) * v;
+
+  // 概念モデル：正しく選ぶ / 取り違える / そもそも呼ばない
+  function model(n) {
+    const correct = Math.max(0.24, 0.97 - Math.pow(Math.max(0, n - 5) / 26, 1.35) * 0.72);
+    const wrong = Math.min(0.5, Math.pow(Math.max(0, n - 4) / 24, 1.2) * 0.42);
+    const none = Math.max(0, 1 - correct - wrong);
+    return { correct, wrong, none };
+  }
+
+  let s = '';
+  [0, .25, .5, .75, 1].forEach((v) => {
+    s += '<line x1="' + P.l + '" y1="' + Y(v) + '" x2="' + (W - P.r) + '" y2="' + Y(v) + '" stroke="#f0f5f7"/>' +
+      '<text x="' + (P.l - 8) + '" y="' + (Y(v) + 4) + '" text-anchor="end" class="svg-mono" font-size="9">' + (v * 100) + '%</text>';
+  });
+  s += '<line x1="' + P.l + '" y1="' + (H - P.b) + '" x2="' + (W - P.r) + '" y2="' + (H - P.b) + '" stroke="#cddde2"/>';
+  for (let n = 4; n <= NMAX; n += 4) {
+    s += '<text x="' + X(n) + '" y="' + (H - P.b + 18) + '" text-anchor="middle" class="svg-mono" font-size="9">' + n + '</text>';
+  }
+  s += '<text x="' + ((P.l + W - P.r) / 2) + '" y="' + (H - 6) + '" text-anchor="middle" class="svg-sub" font-size="10">1体が持つツールの数</text>';
+  svg.innerHTML = s;
+
+  const lines = [
+    { k: 'correct', c: '#2ec4a0', n: '正しいツールを選ぶ' },
+    { k: 'wrong', c: '#f2b544', n: '似たツールを取り違える' },
+    { k: 'none', c: '#f4674f', n: 'そもそも呼ばない' }
+  ];
+  const paths = {}, dots = {}, legs = {};
+  lines.forEach((L, i) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('fill', 'none'); p.setAttribute('stroke', L.c); p.setAttribute('stroke-width', 2.4);
+    p.setAttribute('stroke-linecap', 'round');
+    let d = '';
+    for (let n = 1; n <= NMAX; n++) d += (n === 1 ? 'M' : 'L') + X(n).toFixed(1) + ',' + Y(model(n)[L.k]).toFixed(1);
+    p.setAttribute('d', d); svg.appendChild(p); paths[L.k] = p;
+
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('r', 5); c.setAttribute('fill', '#fff'); c.setAttribute('stroke', L.c); c.setAttribute('stroke-width', 2.2);
+    svg.appendChild(c); dots[L.k] = c;
+
+    const g = document.createElementNS(NS, 'g');
+    g.innerHTML = '<rect x="' + (W - P.r + 16) + '" y="' + (44 + i * 40) + '" width="10" height="10" rx="2" fill="' + L.c + '"/>' +
+      '<text x="' + (W - P.r + 32) + '" y="' + (53 + i * 40) + '" class="svg-label" font-size="11.5">' + L.n + '</text>' +
+      '<text x="' + (W - P.r + 32) + '" y="' + (70 + i * 40) + '" class="svg-mono" font-size="13" font-weight="700" fill="' + L.c + '">—</text>';
+    svg.appendChild(g); legs[L.k] = g.querySelector('.svg-mono');
+  });
+
+  const vline = document.createElementNS(NS, 'line');
+  vline.setAttribute('y1', P.t); vline.setAttribute('y2', H - P.b);
+  vline.setAttribute('stroke', '#10262e'); vline.setAttribute('stroke-width', 1);
+  vline.setAttribute('stroke-dasharray', '3 3'); vline.setAttribute('opacity', '.35');
+  svg.appendChild(vline);
+
+  const range = document.getElementById('tl-range');
+  const nLbl = document.getElementById('tl-n');
+  const foot = document.getElementById('tl-foot');
+
+  function draw(n) {
+    nLbl.textContent = n;
+    const m = model(n);
+    vline.setAttribute('x1', X(n)); vline.setAttribute('x2', X(n));
+    lines.forEach((L) => {
+      dots[L.k].setAttribute('cx', X(n)); dots[L.k].setAttribute('cy', Y(m[L.k]));
+      legs[L.k].textContent = Math.round(m[L.k] * 100) + '%';
+    });
+    if (n <= 8) {
+      foot.innerHTML = '<b>ツール ' + n + '個</b> — 選択はほぼ正確。<b>この帯域に各エージェントを収めるのが分割の狙いの一つ。</b>' +
+        '偵察役なら port_scan / http_probe / web_enum / search / report くらい。';
+    } else if (n <= 16) {
+      foot.innerHTML = '<b>ツール ' + n + '個</b> — 取り違えが目立ち始める。' +
+        '<b>説明文を書き分ける努力でかなり戻せる</b>帯域。「いつ使うか」「使わないのはどんなときか」を docstring に書く。';
+    } else {
+      foot.innerHTML = '<b>ツール ' + n + '個</b> — 単一エージェントに偵察・侵入・昇格の全ツールを持たせるとこの辺り。' +
+        '<b style="color:#d24a33">呼ばない失敗が増える</b>のが厄介 — ログには「何も起きなかった」としか残らず、原因が見えない。';
+    }
+  }
+  range.addEventListener('input', () => draw(+range.value));
+  draw(6);
+})();
+
+/* =======================================================
+   2. 委譲の粒度
+   ======================================================= */
+(function () {
+  const svg = document.getElementById('gr-svg');
+  const foot = document.getElementById('gr-foot');
+
+  const G = [
+    {
+      title: '粗すぎる — 「この標的を攻略して」1発',
+      subs: [{ n: '攻略役', w: 560, t: '偵察＋侵入＋昇格を全部', c: '#f4674f' }],
+      foot: '<b style="color:#d24a33">委譲したのに、サブの中で全部起きる。</b>' +
+        '分割の利益（コンテキスト使い捨て・責務分離・ツール削減）が何も得られない。' +
+        'しかも<b>中で何が起きたか親から見えない</b>ので、ループしていても検知できず、予算だけを消費する。' +
+        '「マルチエージェントにした」と言えるが、実質は単一エージェント＋間接呼び出し。'
+    },
+    {
+      title: '適切 — フェーズ単位で切る',
+      subs: [
+        { n: '偵察役', w: 172, t: '攻撃面の確定', c: '#14b8c4' },
+        { n: '侵入役', w: 172, t: 'シェル取得', c: '#2ec4a0' },
+        { n: '昇格役', w: 172, t: '権限昇格', c: '#f2b544' }
+      ],
+      foot: '<b style="color:#1d9b7c">1委譲あたり 5〜30 ターン程度。</b>' +
+        '各サブは専用ツール 4〜6個で足り、返り値を型で定義できる（<code>ReconResult</code> / <code>ExploitResult</code>…）。' +
+        '親は<b>フェーズ遷移の判断だけ</b>を担当するので、親のプロンプトも短く保てる。' +
+        '<b>本ゼミの役割分担（A/B/C）とも一致</b>し、3人が同時に触れる。'
+    },
+    {
+      title: '細かすぎる — ツール1個＝エージェント1体',
+      subs: [
+        { n: 'PortScan', w: 84, t: '', c: '#9fb2ba' }, { n: 'HttpProbe', w: 84, t: '', c: '#9fb2ba' },
+        { n: 'WebEnum', w: 84, t: '', c: '#9fb2ba' }, { n: 'CveLookup', w: 84, t: '', c: '#9fb2ba' },
+        { n: 'PocFetch', w: 84, t: '', c: '#9fb2ba' }, { n: 'PocRun', w: 84, t: '', c: '#9fb2ba' }
+      ],
+      foot: '<b style="color:#d24a33">オーバーヘッドが利益を食い潰す。</b>' +
+        '1つのツールを呼ぶために LLM 要求が 2〜3 回増える（委譲の指示生成＋サブの計画＋結果の解釈）。' +
+        '<b>LLM要求数が数倍になり、評価指標が悪化する。</b>' +
+        'さらに、サブが1ツールしか持たないなら<b>そのサブに判断の余地がなく</b>、エージェントである意味がない。関数で十分。'
+    }
+  ];
+
+  function draw(k) {
+    const g = G[k];
+    let s = '<text x="30" y="34" class="svg-label" font-size="14" font-weight="700">' + g.title + '</text>';
+
+    // Orchestrator
+    s += '<rect x="330" y="60" width="200" height="46" rx="3" fill="#0e8f9e"/>' +
+      '<text x="430" y="80" text-anchor="middle" class="svg-label" font-size="12.5" font-weight="700" fill="#fff">Orchestrator</text>' +
+      '<text x="430" y="96" text-anchor="middle" class="svg-mono" font-size="8.5" fill="#a9e2e8">フェーズ遷移の判断</text>';
+
+    // サブ
+    const total = g.subs.reduce((a, b) => a + b.w, 0) + (g.subs.length - 1) * 14;
+    let x = 430 - total / 2;
+    g.subs.forEach((sb) => {
+      s += '<path d="M430,106 C430,140 ' + (x + sb.w / 2) + ',130 ' + (x + sb.w / 2) + ',158" fill="none" stroke="#cddde2" stroke-width="1.3"/>';
+      s += '<rect x="' + x + '" y="158" width="' + sb.w + '" height="' + (sb.t ? 56 : 40) + '" rx="3" fill="#fff" stroke="' + sb.c + '" stroke-width="1.5"/>';
+      s += '<text x="' + (x + sb.w / 2) + '" y="' + (sb.t ? 182 : 183) + '" text-anchor="middle" class="svg-label" font-size="' + (sb.w < 100 ? '9.5' : '12') + '" font-weight="700">' + sb.n + '</text>';
+      if (sb.t) s += '<text x="' + (x + sb.w / 2) + '" y="200" text-anchor="middle" class="svg-sub" font-size="10">' + sb.t + '</text>';
+      x += sb.w + 14;
+    });
+
+    // 指標
+    const stats = [
+      ['LLM要求数', ['基準', '基準', '2〜3倍'][k], ['#365360', '#1d9b7c', '#d24a33'][k]],
+      ['親から見える粒度', ['ほぼ無し', '適切', '細かすぎる'][k], ['#d24a33', '#1d9b7c', '#b8801a'][k]],
+      ['ループ検知', ['不可能', '可能', '可能'][k], ['#d24a33', '#1d9b7c', '#1d9b7c'][k]]
+    ];
+    stats.forEach((st, i) => {
+      const sx = 60 + i * 250;
+      s += '<text x="' + sx + '" y="240" class="svg-mono" font-size="9">' + st[0] + '</text>' +
+        '<text x="' + (sx + 110) + '" y="240" class="svg-label" font-size="11.5" font-weight="700" fill="' + st[2] + '">' + st[1] + '</text>';
+    });
+
+    svg.innerHTML = s;
+    foot.innerHTML = g.foot;
+  }
+
+  Z4.seg(document.getElementById('gr-seg'), (v) => draw(+v));
+  draw(1);
+})();
+
+/* =======================================================
+   3. トポロジ
+   ======================================================= */
+(function () {
+  const svg = document.getElementById('tp-svg');
+  const det = document.getElementById('tp-detail');
+  const foot = document.getElementById('tp-foot');
+
+  const nodes = [
+    { id: 'C', n: 'Orchestrator', x: 230, y: 58,  c: '#0e8f9e' },
+    { id: 'R', n: '偵察役',     x: 76,  y: 178, c: '#14b8c4' },
+    { id: 'E', n: '侵入役', x: 230, y: 250, c: '#2ec4a0' },
+    { id: 'P', n: '昇格役',   x: 384, y: 178, c: '#f2b544' },
+    { id: 'W', n: '調査役', x: 230, y: 152, c: '#f7936a' }
+  ];
+
+  const T = [
+    {
+      edges: [['C', 'R'], ['C', 'E'], ['C', 'P'], ['C', 'W']],
+      title: 'スター（中央集権）',
+      body: '<b>全ての委譲が Orchestrator を通る。</b><br><br>' +
+        '<b style="color:#1d9b7c">利点</b>　制御が1箇所に集まる。ループ検知・予算配分・フェーズ遷移を全部 Orchestrator で書ける。' +
+        '<b>ログが一本の木になるのでデバッグしやすい</b>。3人で共同管理するのに向く。<br><br>' +
+        '<b style="color:#d24a33">欠点</b>　侵入役が検索したいたびに、いったん Orchestrator に戻る。' +
+        '<b>往復のたびに LLM 要求が増え、意図が伝言ゲームで劣化する。</b>' +
+        'Orchestrator のコンテキストも、中継のぶん伸びる。',
+      foot: '<b>迷ったらここから始める。</b>制御しやすさは、24時間しかないゼミでは大きな武器になる。'
+    },
+    {
+      edges: [['C', 'R'], ['C', 'E'], ['C', 'P'], ['R', 'W'], ['E', 'W'], ['P', 'W']],
+      title: '部分メッシュ（共有ユーティリティのみ直通）',
+      body: '<b>調査役のような「誰でも使う参照系」だけ直接呼べる。</b>フェーズ間の委譲は Orchestrator 経由のまま。<br><br>' +
+        '<b style="color:#1d9b7c">利点</b>　往復が減り、要求数が下がる。' +
+        '<b>参照系は状態を変えない</b>ので、直通を許しても制御が壊れにくい。<br><br>' +
+        '<b style="color:#d24a33">欠点</b>　調査役の消費が予算表から漏れやすい。' +
+        '<b>誰がいつ検索したかを記録しないと、予算をどこで消費したか分からなくなる。</b><br><br>' +
+        '<b>テンプレート実装はこの形。</b>検索で有用な情報が見つからないときの経路が設計されていない点に注意。',
+      foot: '<b>実用的な折衷案。</b>直通を許す相手を「状態を変えない参照系」に限る、という基準を持つと崩れにくい。'
+    },
+    {
+      edges: [['C', 'R'], ['C', 'E'], ['C', 'P'], ['R', 'E'], ['E', 'P'], ['R', 'P'], ['R', 'W'], ['E', 'W'], ['P', 'W']],
+      title: 'フルメッシュ（誰でも誰にでも）',
+      body: '<b>任意のエージェントが任意のエージェントに委譲できる。</b><br><br>' +
+        '<b style="color:#1d9b7c">利点</b>　柔軟。予期しない経路で解ける可能性がある。<br><br>' +
+        '<b style="color:#d24a33">欠点</b>　<b>相互呼び出しの無限ループが起きる</b>（侵入役→昇格役→侵入役…）。' +
+        '呼び出し深さの制限が必須。予算の配分先が動的に決まるので上限管理が難しく、' +
+        '<b>ログが木ではなくグラフになり、失敗の追跡が一気に困難</b>になる。<br><br>' +
+        '24時間のゼミで最初にこれを選ぶと<b>問題が起きやすい</b>。',
+      foot: '<b style="color:#d24a33">柔軟性の代償が大きすぎる。</b>採るなら、深さ制限・呼び出し履歴の記録・予算の集中管理を先に用意すること。'
+    }
+  ];
+
+  let cur = 0;
+
+  function draw(k, animate) {
+    cur = k;
+    const t = T[k];
+    const pos = {}; nodes.forEach((n) => { pos[n.id] = n; });
+    let s = '<defs><marker id="ta" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">' +
+      '<path d="M0,0 L8,4 L0,8 z" fill="#9fb2ba"/></marker></defs>';
+
+    t.edges.forEach((e, i) => {
+      const a = pos[e[0]], b = pos[e[1]];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      const ux = dx / len, uy = dy / len;
+      const isSearch = e[1] === 'W' || e[0] === 'W';
+      s += '<line x1="' + (a.x + ux * 30) + '" y1="' + (a.y + uy * 30) + '" x2="' + (b.x - ux * 32) + '" y2="' + (b.y - uy * 32) +
+        '" stroke="' + (isSearch ? '#f7936a' : '#9fb2ba') + '" stroke-width="' + (isSearch ? 1.3 : 1.6) + '"' +
+        (isSearch ? ' stroke-dasharray="4 3"' : '') +
+        (animate ? ' class="flowline" style="animation-delay:' + (i * 0.12) + 's"' : '') +
+        ' marker-end="url(#ta)" opacity=".8"/>';
+    });
+
+    nodes.forEach((n) => {
+      const isC = n.id === 'C';
+      s += '<circle cx="' + n.x + '" cy="' + n.y + '" r="' + (isC ? 32 : 28) + '" fill="' + (isC ? n.c : '#fff') +
+        '" stroke="' + n.c + '" stroke-width="1.8"/>';
+      s += '<text x="' + n.x + '" y="' + (n.y + 4) + '" text-anchor="middle" class="svg-label" font-size="' +
+        (n.n.length > 8 ? '9' : '10.5') + '" font-weight="700" fill="' + (isC ? '#fff' : '#10262e') + '">' + n.n + '</text>';
+    });
+
+    s += '<text x="230" y="316" text-anchor="middle" class="svg-sub" font-size="10">' +
+      '実線＝委譲　破線＝参照系への直通　　合計エッジ数 ' + t.edges.length + '</text>';
+
+    svg.innerHTML = s;
+    det.innerHTML = '<div style="font-size:15px;font-weight:700;margin-bottom:12px">' + t.title + '</div>' + t.body;
+    foot.innerHTML = t.foot;
+  }
+
+  Z4.seg(document.getElementById('tp-seg'), (v) => draw(+v, false));
+  document.getElementById('tp-anim').addEventListener('click', () => draw(cur, true));
+  draw(0, false);
+})();
+
+/* =======================================================
+   4. ループ検知
+   ======================================================= */
+(function () {
+  const trace = [
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009)', r: 'Connection refused' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009)', r: 'Connection refused' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009, timeout=30)', r: 'Connection refused' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009, retry=3)', r: 'Connection refused' },
+    { a: 'web_search("Tomcat 9.0.30 ghostcat exploit")', r: '（1回目と同じ結果）' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009)', r: 'Connection refused' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8010)', r: 'Connection refused' },
+    { a: 'web_search("ghostcat 8009 connection refused")', r: '（関連性の低い結果）' },
+    { a: 'exploit_run(cve="CVE-2020-1938", port=8009)', r: 'Connection refused' }
+  ];
+
+  const dets = [
+    { id: 'exact', n: '完全一致', d: '同じツール＋同じ引数が N 回', fire: 2,
+      note: '実装が最も簡単。<b>引数を1つ変えられると素通りする</b>のが弱点。' },
+    { id: 'norm', n: '正規化一致', d: '引数を正規化して比較（timeout/retry 等の無関係な差分を無視）', fire: 4,
+      note: '<b>実用上いちばん効く。</b>「本質的に同じ試行か」を定義する作業がそのまま設計になる。' },
+    { id: 'prog', n: '進捗ベース', d: 'K ターン状態（発見物）が増えていない', fire: 6,
+      note: '<b>最も汎用的で、効果が大きい。</b>手を変えているのに前に進んでいない状況まで捕まえられる。' +
+        '「前進」の定義（新しいサービス／資格情報／シェル／昇格ベクタ）を状態スキーマで決めておくのが前提。' }
+  ];
+
+  const traceEl = document.getElementById('lp2-trace');
+  const detEl = document.getElementById('lp2-det');
+  const foot = document.getElementById('lp2-foot');
+  let i = 0, timer = null;
+
+  function renderDets(fired) {
+    detEl.innerHTML = dets.map((d) => {
+      const on = fired[d.id];
+      return '<div style="border:1px solid ' + (on ? '#f4674f' : 'var(--line)') + ';border-radius:3px;padding:11px 13px;margin-bottom:10px;' +
+        'background:' + (on ? '#fff6f3' : '#fff') + ';transition:all .3s">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
+        '<b style="font-size:12.5px">' + d.n + '</b>' +
+        '<span class="chip ' + (on ? 'coral' : '') + '" style="font-size:9.5px">' + (on ? '検知 @ ' + on : '監視中') + '</span></div>' +
+        '<div style="font-size:11.5px;color:var(--ink-3);line-height:1.7">' + d.d + '</div>' +
+        (on ? '<div style="font-size:11.5px;color:var(--ink-2);line-height:1.7;margin-top:7px;border-top:1px solid #f3d9d2;padding-top:7px">' + d.note + '</div>' : '') +
+        '</div>';
+    }).join('');
+  }
+
+  const fired = {};
+  function step() {
+    if (i >= trace.length) { stop(); return; }
+    const t = trace[i];
+    const d = document.createElement('div');
+    d.style.cssText = 'opacity:0;transition:opacity .3s;padding:2px 0';
+    d.innerHTML = '<span style="color:var(--ink-4)">' + String(i + 1).padStart(2, '0') + '</span>　' +
+      '<span style="color:#0a6f7c">' + t.a.replace(/</g, '&lt;') + '</span><br>' +
+      '<span style="color:var(--ink-4);padding-left:24px">→ ' + t.r + '</span>';
+    traceEl.appendChild(d);
+    requestAnimationFrame(() => { d.style.opacity = '1'; });
+    traceEl.scrollTop = traceEl.scrollHeight;
+
+    i++;
+    dets.forEach((dt) => { if (i >= dt.fire && !fired[dt.id]) fired[dt.id] = i; });
+    renderDets(fired);
+
+    if (i === trace.length) {
+      foot.innerHTML = '<b style="color:#d24a33">9ターン、要求数にして20回以上を「Connection refused」に費やした。</b>' +
+        '原因は単純 — <b>8009 番はそもそも開いていない</b>（<a href="lecture-01.html">座学①</a>のトレースで保留にした理由がこれ）。' +
+        '版が一致しているという情報だけで LLM は突き進む。<b>検知器がなければ、予算が尽きるまで止まらない。</b>';
+    } else if (fired.norm && !fired.prog) {
+      foot.innerHTML = '<b>正規化一致が発火した。</b>ここで止めれば、残り5ターンぶんの予算を別ベクタに回せた。';
+    }
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; document.getElementById('lp2-play').textContent = '▶ 再生'; } }
+  function reset() {
+    stop(); i = 0; Object.keys(fired).forEach((k) => delete fired[k]);
+    traceEl.innerHTML = ''; renderDets(fired);
+    foot.innerHTML = '実際のログでよく見る形。予算を使い切るまで止まらない。';
+  }
+  document.getElementById('lp2-reset').addEventListener('click', reset);
+  document.getElementById('lp2-play').addEventListener('click', function () {
+    if (timer) { stop(); return; }
+    if (i >= trace.length) reset();
+    this.textContent = '■ 停止';
+    timer = setInterval(step, 750);
+  });
+  reset();
+})();
+
+/* =======================================================
+   5. 予算配分
+   ======================================================= */
+(function () {
+  const svg = document.getElementById('bg-svg');
+  const foot = document.getElementById('bg-foot');
+  const TOTAL = 120;
+
+  const P = [
+    {
+      n: '均等', alloc: [12, 36, 36, 36],
+      foot: '<b>無難だが、標的によって外れる。</b>Web のない標的では偵察役の36が余り、' +
+        '独自実装の標的では侵入役の36が全く足りない。<b>開発用標的は意図的に多様</b>なので、固定配分はどこかで必ず外す。'
+    },
+    {
+      n: '偵察厚め', alloc: [12, 56, 30, 22],
+      foot: '<b>攻撃面を取りこぼさない方針。</b>非HTTPサービスの列挙漏れには効く（担当Aの課題）。' +
+        'ただし<b style="color:#d24a33">偵察で予算を使い切ると、侵入する前に終わる</b>。' +
+        '「偵察は完璧だが何も取れていない」というログは、素の実装でよく見る形。'
+    },
+    {
+      n: '侵入厚め', alloc: [12, 24, 60, 24],
+      foot: '<b>PoC の適応に時間がかかる前提の配分。</b>実際侵入役は最も試行回数を要する。' +
+        'ただし<b style="color:#d24a33">偵察が不十分だと、そもそも間違った入口を延々試す</b>ことになる。' +
+        '上のループ検知デモがまさにこの失敗（開いていないポートを叩き続ける）。'
+    },
+    {
+      n: '動的', alloc: [16, 30, 40, 34], dyn: true,
+      foot: '<b style="color:#1d9b7c">初期配分は小さく、成果が出た方向に追加で配る。</b>' +
+        '「偵察役が有望なサービスを3つ返した → 侵入役に追加10」「2回連続でループ検知 → その方向は打ち切って残りを別へ」。' +
+        '<b>実装は複雑になるが、多様な標的に対しては最も有効。</b>' +
+        'Orchestrator の方針を3人で見直すとき、有力な選択肢になる。'
+    }
+  ];
+
+  const rows = [
+    { n: 'Orchestrator', c: '#0e8f9e' },
+    { n: '偵察役',     c: '#14b8c4' },
+    { n: '侵入役', c: '#2ec4a0' },
+    { n: '昇格役',   c: '#f2b544' }
+  ];
+
+  function draw(k) {
+    const p = P[k];
+    const X0 = 130, W = 640;
+    let s = '<text x="30" y="26" class="svg-mono" font-size="10">ALLOCATION</text>' +
+      '<text x="' + (X0 + W) + '" y="26" text-anchor="end" class="svg-mono" font-size="10">合計 ' +
+      p.alloc.reduce((a, b) => a + b, 0) + ' / ' + TOTAL + ' requests</text>';
+
+    // 積み上げバー
+    let x = X0;
+    rows.forEach((r, i) => {
+      const w = (p.alloc[i] / TOTAL) * W;
+      s += '<rect x="' + x + '" y="44" width="' + Math.max(0, w - 2) + '" height="34" rx="2" fill="' + r.c + '" opacity=".9"/>';
+      if (w > 34) s += '<text x="' + (x + w / 2) + '" y="66" text-anchor="middle" class="svg-mono" font-size="11" font-weight="700" fill="#fff">' + p.alloc[i] + '</text>';
+      x += w;
+    });
+
+    // 個別行
+    rows.forEach((r, i) => {
+      const y = 106 + i * 27;
+      s += '<text x="30" y="' + (y + 4) + '" class="svg-label" font-size="11.5" font-weight="700">' + r.n + '</text>';
+      const w = (p.alloc[i] / TOTAL) * W;
+      s += '<rect x="' + X0 + '" y="' + (y - 7) + '" width="' + W + '" height="11" rx="2" fill="#f0f5f7"/>';
+      s += '<rect x="' + X0 + '" y="' + (y - 7) + '" width="' + w + '" height="11" rx="2" fill="' + r.c + '">' +
+        '<animate attributeName="width" from="0" to="' + w + '" dur="0.45s" fill="freeze"/></rect>';
+      s += '<text x="' + (X0 + W + 10) + '" y="' + (y + 3) + '" class="svg-mono" font-size="10">' + p.alloc[i] + '</text>';
+      if (p.dyn && i > 0) {
+        s += '<text x="' + (X0 + w + 8) + '" y="' + (y + 3) + '" class="svg-mono" font-size="9" fill="#1d9b7c">+ 成果に応じて追加</text>';
+      }
+    });
+
+    svg.innerHTML = s;
+    foot.innerHTML = p.foot;
+  }
+
+  Z4.seg(document.getElementById('bg-seg'), (v) => draw(+v));
+  draw(0);
+})();
+</script>
+
+</body>
+</html>
